@@ -4,7 +4,10 @@ Interactive re-gating of the 10 September 2026 Fortessa tubes. Drag the dye cut-
 
 ## Live site
 
-Netlify hosts the `site/` folder. Gate presets are stored in Supabase table `e1_flow_gate_presets`.
+- App: https://thp1-plasma-flow.netlify.app
+- Code: https://github.com/drmahmoodhachim-gif/thp1-plasma-flow
+
+Gate presets are stored in Supabase table `e1_flow_gate_presets`.
 
 ## Local
 
