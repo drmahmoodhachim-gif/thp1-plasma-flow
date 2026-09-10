@@ -244,7 +244,7 @@ function drawScatter() {
     const idx = sampleIdx(r.cls, c, 4000, 2);
     if (!idx.length) continue;
     traces.push({
-      type: "scattergl", mode: "markers", name: LABELS[c],
+      type: "scatter", mode: "markers", name: LABELS[c],
       x: take(t.fsc, idx), y: take(t.ssc, idx),
       marker: { size: c === 3 ? 5 : 3, color: COL[c], opacity: c === 0 ? 0.18 : 0.55 }
     });
@@ -489,6 +489,7 @@ function refresh(keepPlot) {
   }
   if (curFig === "donuts") $("plot").innerHTML = "";
   FIGURES[curFig]();
+  if (window.Plotly && $("plot").data) Plotly.Plots.resize("plot");
 }
 
 function syncTubeTabs() {
