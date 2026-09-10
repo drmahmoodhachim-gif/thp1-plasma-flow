@@ -1,0 +1,18 @@
+.env
+.env.*
+*.fcs
+*.wsp
+*.pptx
+*.zip
+Flow Files/
+Debris/
+Fancy/
+extracted_code/
+extracted_fancy/
+interface/
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

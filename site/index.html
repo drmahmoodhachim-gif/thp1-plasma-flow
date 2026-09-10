@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>E1 · THP-1 + mouse plasma · live explorer</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="boot">Loading 560,000 flow events…</div>
+  <header>
+    <div>
+      <h1>THP-1 + mouse plasma · live interactive explorer</h1>
+      <p class="sub">Move the gates. Every figure is recalculated from the raw FCS events in your browser. Save a preset to Supabase to share it.</p>
+    </div>
+    <div class="header-links">
+      <a href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow" target="_blank" rel="noopener">GitHub</a>
+    </div>
+  </header>
+
+  <div class="shell">
+    <aside>
+      <h2>Your gates</h2>
+      <label>Strategy
+        <select id="gateMode">
+          <option value="recommended">Recommended (keeps dead cells)</option>
+          <option value="original">Original FlowJo (hides dead cells)</option>
+        </select>
+      </label>
+      <label>Dye cut-off (APC-Cy7-A)
+        <input id="dyeCutoff" type="range" min="50" max="5000" step="5" value="535">
+        <span class="val"><b id="dyeVal"></b> <small id="dyeLog"></small></span>
+      </label>
+      <label>Singlet ratio min
+        <input id="singletLo" type="range" min="0.30" max="0.80" step="0.01" value="0.55">
+        <span class="val" id="loVal"></span>
+      </label>
+      <label>Singlet ratio max
+        <input id="singletHi" type="range" min="0.70" max="1.10" step="0.01" value="0.90">
+        <span class="val" id="hiVal"></span>
+      </label>
+      <label>Minimum cell size (FSC)
+        <input id="fscMin" type="range" min="20000" max="120000" step="1000" value="60000">
+        <span class="val" id="fscVal"></span>
+      </label>
+      <p class="hint" id="origHint" hidden>Original FlowJo uses the workspace polygons. Dye and singlet sliders are ignored in that mode.</p>
+      <button type="button" id="resetBtn">Reset to recommended</button>
+
+      <h2>Save / load</h2>
+      <input id="presetName" type="text" maxlength="80" placeholder="Preset name">
+      <input id="presetAuthor" type="text" maxlength="80" placeholder="Your name (optional)">
+      <button type="button" id="saveBtn">Save gates to Supabase</button>
+      <p class="status" id="saveStatus"></p>
+      <label>Saved presets
+        <select id="presetList"><option value="">Loading…</option></select>
+      </label>
+      <button type="button" id="loadBtn">Apply selected preset</button>
+    </aside>
+
+    <section class="main">
+      <div class="tabs" id="tubeTabs"></div>
+      <div class="stats" id="stats"></div>
+      <div class="figs" id="figTabs">
+        <button type="button" data-fig="3d" class="on">3D</button>
+        <button type="button" data-fig="scatter">Scatter</button>
+        <button type="button" data-fig="ridge">Ridgeline</button>
+        <button type="button" data-fig="dose">Dose–response</button>
+        <button type="button" data-fig="donuts">Donuts</button>
+        <button type="button" data-fig="funnel">Funnel</button>
+        <button type="button" data-fig="mix">Composition</button>
+        <button type="button" data-fig="density">Density</button>
+      </div>
+      <div id="plot"></div>
+      <p class="cap" id="cap"></p>
+    </section>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/plotly.js/2.27.0/plotly.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

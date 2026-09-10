@@ -1,0 +1,4 @@
+window.E1_CONFIG = {
+  supabaseUrl: "https://kgstszoegfruakzuhvtd.supabase.co",
+  supabaseAnonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imtnc3Rzem9lZ2ZydWFrenVodnRkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjk4MTYsImV4cCI6MjA5MTYwNTgxNn0.CAWCFpZfZH73KGibMFwaTF3Cc_Mk9GGK6xuCr88BQpE"
+};

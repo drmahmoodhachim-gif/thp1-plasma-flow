@@ -1,0 +1,33 @@
+Here are all the Python scripts in one zip, plus a methods document you can also open on its own. Rather than send my working scratch files, I rewrote them into a tidy, commented set of scripts.
+
+Running it:
+
+pip install -r flow_analysis/requirements.txt
+cd flow_analysis
+python run_all.py --data ../data --out ../output
+
+Put your 10 .fcs files and the FlowJo .wsp file in one folder and point --data at it. The original file names with "%" work fine. It takes about a minute and produces every figure (300 dpi) and four CSV tables.
+
+Checks I ran:
+
+I ran the scripts from scratch on a copy of your files. They reproduce the figures in the deck, with only tiny pixel differences in two charts.
+The first step checks the Python gates against your FlowJo workspace. Every count matches FlowJo within 1.5%, apart from one heat-killed gate where FlowJo counts 20 cells and Python 19.
+
+What's in the zip:
+
+config.py holds every setting: file names, gate positions and cut-offs. To change a gate, edit this file only.
+flowdata.py reads the files and applies both the original and the recommended gates.
+parse_workspace.py reads the gates out of your FlowJo file and checks the counts.
+figures_part1.py makes figures 1–5.
+figures_part2.py makes figures 6–9 and the two supplementary gating figures.
+figures_overview.py makes the first quick overview plots.
+tables.py writes four tables:
+Your original gating, reproduced.
+Event rates per second.
+Viability with 95% confidence intervals.
+The dose-trend test.
+extras/make_deck.js rebuilds the PowerPoint. It needs Node.js rather than Python.
+
+METHODS.md covers each step in two layers, the technical method plus a plain-language "why". It also has a results table, the limitations, and a draft methods paragraph for your thesis.
+
+Before you use the methods text, fill in the parts in [brackets]: the dye name, plasma exposure time, anticoagulant, and heat-kill conditions. These aren't recorded in the data files. The README also explains how to reuse the scripts for E2 and E3.
