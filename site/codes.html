@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>How the codes work · E1 THP-1 plasma</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="guide-page">
+  <header>
+    <div>
+      <h1>How the codes work</h1>
+      <p class="sub">Every script used to read the cytometer files, draw the figures, and build this live page. Click a file name to open it on GitHub. Plain-language notes sit under each step.</p>
+    </div>
+    <div class="header-links">
+      <a href="index.html">Live explorer</a>
+      <a href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow" target="_blank" rel="noopener">GitHub repo</a>
+    </div>
+  </header>
+
+  <nav class="jump">
+    <a href="#run">1. Run everything</a>
+    <a href="#scripts">2. What each script does</a>
+    <a href="#figures">3. Which script makes which figure</a>
+    <a href="#web">4. Live interactive page</a>
+  </nav>
+
+  <main class="guide">
+    <section id="run">
+      <h2>1. Run everything (one command)</h2>
+      <p>Put the 10 <code>.fcs</code> tubes and the FlowJo <code>.wsp</code> file in one folder. Then, from a terminal:</p>
+      <pre>pip install -r flow_analysis/requirements.txt
+cd flow_analysis
+python run_all.py --data "../Flow Files" --out ../output --skip-overview</pre>
+      <p>That one script calls the others in order: check FlowJo gates → figures 1–9 → tables → fancy figures 10–16 → 3D HTML. About one minute.</p>
+      <p>To rebuild only the live website data after that:</p>
+      <pre>python flow_analysis/export_web_data.py --data "Flow Files" --out site/data</pre>
+      <p>
+        <a class="file" href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/flow_analysis/run_all.py">Open run_all.py</a>
+        <a class="file" href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/flow_analysis/requirements.txt">Open requirements.txt</a>
+        <a class="file" href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/METHODS.md">Open METHODS.md</a>
+      </p>
+    </section>
+
+    <section id="scripts">
+      <h2>2. What each script does</h2>
+      <p>Start at the top and work down. You only need to edit <strong>config.py</strong> if a gate or file name changes.</p>
+
+      <article class="card">
+        <h3>Settings</h3>
+        <p><a class="file" href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/flow_analysis/config.py">config.py</a> — File names, original FlowJo polygons, recommended gates, dye cut-off (535), singlet ratio (0.55–0.90), colours. Change a gate here only.</p>
+        <p><a class="file" href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/flow_analysis/plotstyle.py">plotstyle.py</a> — Shared look of the PNG figures (fonts, axes, save at 300 dpi).</p>
+      </article>
+
+      <article class="card">
+        <h3>Read the cytometer files</h3>
+        <p><a class="file" href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/flow_analysis/flowdata.py">flowdata.py</a> — Opens each <code>.fcs</code> file, applies the original and recommended gates, logicle (biexponential) dye scale, and 95% confidence intervals.</p>
+        <p><a class="file" href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/flow_analysis/parse_workspace.py">parse_workspace.py</a> — Reads gates from the FlowJo workspace and checks that Python counts match FlowJo (within about 1.5%).</p>
+      </article>
+
+      <article class="card">
+        <h3>Figures and tables</h3>
+        <p><a class="file" href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/flow_analysis/figures_overview.py">figures_overview.py</a> — Exploratory grids of every tube through the original gates (fig S0). Slow; skip with <code>--skip-overview</code>.</p>
+        <p><a class="file" href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/flow_analysis/figures_part1.py">figures_part1.py</a> — Figures 1–5: original gating and why it over-estimates viability.</p>
+        <p><a class="file" href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/flow_analysis/figures_part2.py">figures_part2.py</a> — Figures 6–9 and S1: recommended gating, dose–response, composition, granularity.</p>
+        <p><a class="file" href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/flow_analysis/figures_fancy.py">figures_fancy.py</a> — Figures 10–16 (summary, ridgeline, density, funnel, joint plot, donuts, debris) and the original 3D HTML explorer.</p>
+        <p><a class="file" href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/flow_analysis/tables.py">tables.py</a> — Four CSV tables: original gating, event rates, recommended viability with CIs, dose-trend test.</p>
+        <p><a class="file" href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/flow_analysis/extras/make_deck.js">extras/make_deck.js</a> — Optional: rebuilds the PowerPoint from the PNGs (needs Node.js and <code>pptxgenjs</code>).</p>
+      </article>
+
+      <article class="card">
+        <h3>Live website</h3>
+        <p><a class="file" href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/flow_analysis/export_web_data.py">export_web_data.py</a> — Packs all ~560,000 events into <code>site/data/events.bin</code> plus <code>meta.json</code> so the browser can re-gate without Python.</p>
+        <p><a class="file" href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/flow_analysis/interactive_dashboard.py">interactive_dashboard.py</a> — Earlier local HTML dashboard (sampled 3D view). The public site below replaced this.</p>
+        <p><a class="file" href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/site/index.html">site/index.html</a> — Page layout: gate sliders, tube tabs, figure tabs.</p>
+        <p><a class="file" href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/site/app.js">site/app.js</a> — Applies your gates in the browser and redraws every figure.</p>
+        <p><a class="file" href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/site/styles.css">site/styles.css</a> — Colours and layout.</p>
+        <p><a class="file" href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/site/config.js">site/config.js</a> — Supabase address so saved gate presets can be stored and loaded.</p>
+        <p><a class="file" href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/netlify.toml">netlify.toml</a> — Tells Netlify to publish the <code>site/</code> folder.</p>
+      </article>
+    </section>
+
+    <section id="figures">
+      <h2>3. Which script makes which figure</h2>
+      <table>
+        <thead><tr><th>Figure / table</th><th>What you see</th><th>Script</th></tr></thead>
+        <tbody>
+          <tr><td>Fig 1</td><td>Original 3-step FlowJo gating, 0% vs 70%</td><td><a href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/flow_analysis/figures_part1.py">figures_part1.py</a></td></tr>
+          <tr><td>Fig 2</td><td>Dead cells hidden outside the THP gate</td><td><a href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/flow_analysis/figures_part1.py">figures_part1.py</a></td></tr>
+          <tr><td>Fig 3</td><td>Plasma particle cloud</td><td><a href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/flow_analysis/figures_part1.py">figures_part1.py</a></td></tr>
+          <tr><td>Fig 4</td><td>Dye histograms</td><td><a href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/flow_analysis/figures_part1.py">figures_part1.py</a></td></tr>
+          <tr><td>Fig 5</td><td>Old singlet triangle vs wider band</td><td><a href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/flow_analysis/figures_part1.py">figures_part1.py</a></td></tr>
+          <tr><td>Fig 6</td><td>Viability vs % plasma, 95% CI, trend</td><td><a href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/flow_analysis/figures_part2.py">figures_part2.py</a></td></tr>
+          <tr><td>Fig 7</td><td>Composition of each tube</td><td><a href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/flow_analysis/figures_part2.py">figures_part2.py</a></td></tr>
+          <tr><td>Fig 8</td><td>Live-cell granularity vs dose</td><td><a href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/flow_analysis/figures_part2.py">figures_part2.py</a></td></tr>
+          <tr><td>Fig 9 / S1</td><td>Recommended gating on key / all tubes</td><td><a href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/flow_analysis/figures_part2.py">figures_part2.py</a></td></tr>
+          <tr><td>Fig 10</td><td>Summary panel A–F</td><td><a href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/flow_analysis/figures_fancy.py">figures_fancy.py</a></td></tr>
+          <tr><td>Fig 11</td><td>Ridgeline of dye</td><td><a href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/flow_analysis/figures_fancy.py">figures_fancy.py</a></td></tr>
+          <tr><td>Fig 12</td><td>Density difference 70% − 0%</td><td><a href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/flow_analysis/figures_fancy.py">figures_fancy.py</a></td></tr>
+          <tr><td>Fig 13</td><td>Gating funnel</td><td><a href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/flow_analysis/figures_fancy.py">figures_fancy.py</a></td></tr>
+          <tr><td>Fig 14</td><td>Live-cell size vs granularity</td><td><a href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/flow_analysis/figures_fancy.py">figures_fancy.py</a></td></tr>
+          <tr><td>Fig 15</td><td>Viability donuts</td><td><a href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/flow_analysis/figures_fancy.py">figures_fancy.py</a></td></tr>
+          <tr><td>Fig 16</td><td>Debris vs plasma particles</td><td><a href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/flow_analysis/figures_fancy.py">figures_fancy.py</a></td></tr>
+          <tr><td>3D HTML</td><td>Original rotatable explorer</td><td><a href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/flow_analysis/figures_fancy.py">figures_fancy.py</a></td></tr>
+          <tr><td>Tables 1–4</td><td>CSV counts, rates, viability, trend</td><td><a href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/flow_analysis/tables.py">tables.py</a></td></tr>
+          <tr><td>Live page figures</td><td>All of the above, but they move when you change a slider</td><td><a href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/site/app.js">site/app.js</a></td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section id="web">
+      <h2>4. How the live interactive page is built</h2>
+      <ol class="steps">
+        <li>Python reads the <code>.fcs</code> files (<a href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/flow_analysis/flowdata.py">flowdata.py</a>).</li>
+        <li><a href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/flow_analysis/export_web_data.py">export_web_data.py</a> writes <code>site/data/events.bin</code> (raw FSC, SSC, FSC-H, dye for every event) and <code>site/data/meta.json</code> (gate polygons, tube names).</li>
+        <li>The browser loads those files. <a href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/site/app.js">app.js</a> tests each event against the sliders you set (dye cut-off, singlet band, cell-size gate, or original FlowJo polygons).</li>
+        <li>Every figure tab is redrawn from that new classification. Nothing is a static PNG on this page.</li>
+        <li>If you save a preset, <a href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/site/config.js">config.js</a> sends it to the Supabase table <code>e1_flow_gate_presets</code>.</li>
+        <li>Netlify hosts the <code>site/</code> folder, as set in <a href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow/blob/main/netlify.toml">netlify.toml</a>.</li>
+      </ol>
+      <p><a class="file" href="index.html">Back to the live explorer</a>
+        <a class="file" href="https://github.com/drmahmoodhachim-gif/thp1-plasma-flow">Open the full repository</a></p>
+    </section>
+  </main>
+</body>
+</html>
