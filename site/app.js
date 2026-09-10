@@ -136,8 +136,8 @@ function linreg(xs, ys) {
   const se = Math.sqrt(sse / (df * sxx));
   const t = slope / se;
   const z = Math.abs(t) * (1 - 1 / (4 * df)) / Math.sqrt(1 + t * t / (2 * df));
-  const p = Math.min(1, 1 - erf(z / Math.SQRT2));
-  return { slope, intercept, r2, p: 2 * (p < 0 ? 0 : p > 1 ? 1 : p), se, mx, sxx, sse, df };
+  const p = Math.min(1, Math.max(0, 1 - erf(z / Math.SQRT2)));
+  return { slope, intercept, r2, p, se, mx, sxx, sse, df };
 }
 
 function sampleIdx(cls, code, max, seed) {
@@ -479,15 +479,19 @@ const FIGURES = {
   donuts: drawDonuts, funnel: drawFunnel, mix: drawMix, density: drawDensity
 };
 
+function clearPlot() {
+  const el = $("plot");
+  if (window.Plotly && el && (el.data || el.classList.contains("js-plotly-plot"))) {
+    try { Plotly.purge(el); } catch (err) { /* plot was already empty */ }
+  }
+  el.innerHTML = "";
+}
+
 function refresh(keepPlot) {
   setSliderLabels();
   updateStats();
   syncTubeTabs();
-  if (!keepPlot && $("plot").data) { /* plotly graph */ }
-  if (curFig !== "donuts" && $("plot").classList.contains("js-plotly-plot") === false) {
-    $("plot").innerHTML = "";
-  }
-  if (curFig === "donuts") $("plot").innerHTML = "";
+  if (!keepPlot) clearPlot();
   FIGURES[curFig]();
   if (window.Plotly && $("plot").data) Plotly.Plots.resize("plot");
 }
@@ -534,7 +538,6 @@ function initControls() {
     if (!btn) return;
     curFig = btn.dataset.fig;
     [...$("figTabs").children].forEach((b) => b.classList.toggle("on", b === btn));
-    $("plot").innerHTML = "";
     refresh();
   };
   ["dyeCutoff", "singletLo", "singletHi", "fscMin"].forEach((id) => $(id).addEventListener("input", schedule));
