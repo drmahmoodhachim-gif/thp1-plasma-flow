@@ -29,6 +29,23 @@
     [0.0048, 1.0, 0.1167],   // PE-Cy7
     [0.0, 0.0058, 1.0]       // BV786
   ];
+  // Viability dye collected on the PI detector. Only the spectrum changes; PI remains the default
+  // so the 12 Oct calibration is untouched. DAPI and a fixable near-IR dye spill far less into PE-Cy7.
+  const VIABILITY = {
+    PI: { name: 'PI', spill: [1.0, 0.7937, 0.1782] },
+    DAPI: { name: 'DAPI', spill: [1.0, 0.012, 0.06] },
+    fixable: { name: 'Fixable NIR', spill: [1.0, 0.008, 0.01] }
+  };
+  function spillFor(p) {
+    const v = VIABILITY[(p && p.viability)] || VIABILITY.PI;
+    return [v.spill, SPILL_REF[1], SPILL_REF[2]];
+  }
+  // Compensation treats PI-channel and PE-Cy7-channel autofluorescence as dye and subtracts it from BV786
+  // (about 0.18 × PI autofluorescence and 0.12 × PE-Cy7 autofluorescence). PMA cells are brighter in those
+  // two channels, so compensated HLA-DR on a PMA FMO falls below an untreated FMO unless BV786 autofluorescence
+  // is raised by more than that subtraction. Stained PMA tubes subtract the same amount from the HLA-DR
+  // fluorochrome, which keeps the 12 Oct percentages where they were fitted.
+  const PMA_BV786_AF_EXTRA = 160;
   const NOISE_E = { PI: 40, 'PE-Cy7': 75, BV786: 90 };   // electronic noise SD, raw units
   const PHOTON_C = 2.0;                                  // photon-counting spread: SD = sqrt(c × signal)
 
@@ -39,6 +56,7 @@
     detach: 'scrape', poolFloaters: true, delayMin: 60, temp: 'ice', piTiming: 'last', washes: 3,
     abQuality: { hla: 1.0, cd11b: 1.0 },  // 1 = titrated antibody working; 0.01 ≈ the 4 Oct failure
     fmoCells: 'untreated',                 // 'untreated' or 'pma'
+    viability: 'PI',                       // 'PI' | 'DAPI' | 'fixable'
     replicates: 2, includeC1R: true, includeFMO: true, includeUntreated: true
   };
   const DEFAULT_INSTRUMENT = {
@@ -77,7 +95,7 @@
     H.baseline = 0.035 + Math.max(0, p.washes - 2) * 0.006 + p.delayMin * 0.0008 * (p.temp === 'rt' ? 2.5 : 1);
     if (p.serum < 10) H.serum = 0.02 * (10 - p.serum);
     if (p.passage > 25) H.passage = 0.005 * (p.passage - 25);
-    if (!p.mycoTested) H.myco = 0.05;
+    // Mycoplasma "not tested" is an unknown, not a fitted cause of death. Pre-flight warns; nothing is added here.
     if (p.seedDensity > 1) H.density = 0.10 * (p.seedDensity - 1) * (pma ? 2 : 1);
     if (p.seedDensity < 0.2) H.density = 0.10;
     if (p.piTiming === 'early') H.piEarly = 0.03;
@@ -143,9 +161,9 @@
     add(p.serum !== d.serum, `serum ${p.serum}% (fitted at 10%; serum above 10% has no effect in this model)`);
     add(p.passage !== d.passage, `passage ${p.passage} (fitted near passage 15)`);
     add(p.seedDensity !== d.seedDensity, `seeding ${p.seedDensity} million/mL (fitted at 0.5)`);
-    add(!p.mycoTested, '“mycoplasma not tested” is not an unknown here: the model adds an infection penalty');
     add(p.delayMin !== d.delayMin || p.temp !== d.temp, 'the wait before acquisition differs from the fitted run');
     add(p.piTiming !== d.piTiming, 'PI added with the antibodies was not how the fitted runs were stained');
+    add(p.viability && p.viability !== 'PI', `viability dye ${p.viability} was not used in the fitted runs (those used PI)`);
     return r;
   }
 
@@ -179,7 +197,7 @@
     arms.push({ key: 'pma', label: 'PMA', pma: true, ifn: false, n: p.replicates });
     arms.push({ key: 'combo', label: 'PMA + IFN-γ', pma: true, ifn: true, n: p.replicates });
     for (const a of arms) for (let r = 0; r < a.n; r++)
-      T.push({ id: a.key + (a.n > 1 ? '_' + 'abc'[r] : ''), arm: a.key, label: a.label + (a.n > 1 ? ' (' + 'abc'[r] + ')' : ''), kind: 'sample', cells: 'THP-1', pma: a.pma, ifn: a.ifn, stain: { pi: true, cd11b: true, hla: true } });
+      T.push({ id: a.key + (a.n > 1 ? '_' + 'abc'[r] : ''), arm: a.key, label: a.label + (a.n > 1 ? ' (technical ' + 'abc'[r] + ')' : ''), kind: 'sample', cells: 'THP-1', pma: a.pma, ifn: a.ifn, stain: { pi: true, cd11b: true, hla: true } });
     if (p.includeFMO) {
       const fp = p.fmoCells === 'pma';
       T.push({ id: 'fmo_hla', arm: 'fmo', label: 'HLA-DR FMO' + (fp ? ' (PMA cells)' : ''), kind: 'fmo', cells: 'THP-1', pma: fp, ifn: false, stain: { pi: true, cd11b: true, hla: false } });
@@ -188,7 +206,8 @@
     if (p.includeC1R) T.push({ id: 'c1r', arm: 'c1r', label: 'C1R (HLA-DR⁺ control)', kind: 'sample', cells: 'C1R', pma: false, ifn: false, stain: { pi: true, cd11b: true, hla: true } });
     // compensation controls (acquired at control voltages)
     T.push({ id: 'cc_unstained', label: 'Unstained', kind: 'control', cells: 'THP-1', pma: false, ifn: false, stain: { pi: false, cd11b: false, hla: false } });
-    T.push({ id: 'cc_pi', label: 'PI single stain', kind: 'control', cells: 'THP-1-heatkilled', pma: false, ifn: false, stain: { pi: true, cd11b: false, hla: false } });
+    const dye = (VIABILITY[p.viability] || VIABILITY.PI).name;
+    T.push({ id: 'cc_pi', label: dye + ' single stain', kind: 'control', cells: 'THP-1-heatkilled', pma: false, ifn: false, stain: { pi: true, cd11b: false, hla: false } });
     T.push({ id: 'cc_pecy7', label: 'PE-Cy7 beads', kind: 'control', cells: 'beads', bead: 'PE-Cy7', stain: {} });
     T.push({ id: 'cc_bv786', label: 'BV786 beads', kind: 'control', cells: 'beads', bead: 'BV786', stain: {} });
     return T;
@@ -197,6 +216,7 @@
   // ---------- events ----------
   function simulateTube(tube, p, inst, seed) {
     const R = rng(seed);
+    const spill = spillFor(p);
     const V = tube.kind === 'control' && !inst.sameVoltages ? inst.controlV : inst.sampleV;
     const g = {}; for (const ch of Object.keys(REF_V)) g[ch] = gain(ch, V[ch]);
     const N = inst.events;
@@ -217,7 +237,7 @@
     const cum = []; let acc = 0; for (const [k, v] of Object.entries(mix)) { acc += v; cum.push([acc, k]); }
     const cond = tube.cells === 'THP-1' ? condition(p, tube) : null;
     const isPMA = !!tube.pma;
-    const AF = tube.cells === 'C1R' ? { PI: 90, 'PE-Cy7': 20, BV786: 60 } : isPMA ? { PI: 400, 'PE-Cy7': 330, BV786: 130 } : { PI: 100, 'PE-Cy7': 40, BV786: 98 };
+    const AF = tube.cells === 'C1R' ? { PI: 90, 'PE-Cy7': 20, BV786: 60 } : isPMA ? { PI: 400, 'PE-Cy7': 330, BV786: 130 + PMA_BV786_AF_EXTRA } : { PI: 100, 'PE-Cy7': 40, BV786: 98 };
     let i = 0, guard = 0, t = 0;
     const rate = 300 + R.u() * 200;
     while (i < N && guard < N * 20) {
@@ -262,12 +282,14 @@
           if (tube.cells === 'C1R') tr['PE-Cy7'] = R.logn(15, 0.8) * qC;
           else if (cond) tr['PE-Cy7'] = (isPMA && R.u() < 0.09 ? R.logn(120, 0.85) : R.logn(cond.cd11bMed, isPMA ? 1.0 : 0.85)) * qC * (cls === 'live' ? 1 : 0.6);
         }
+        // Offset the extra PMA autofluorescence on stained tubes so fitted HLA-DR percentages do not move.
+        if (isPMA && tube.stain.hla) tr.BV786 -= PMA_BV786_AF_EXTRA;
       }
       // detectors
       const det = {};
       FLUORS.forEach((d, j) => {
         let s = (AF[d] + ns[d]) * (truth === 5 ? 0.05 : 1) * (truth === 3 ? 0.3 : 1);
-        FLUORS.forEach((f, k) => { s += tr[f] * SPILL_REF[k][j]; });
+        FLUORS.forEach((f, k) => { s += tr[f] * spill[k][j]; });
         s *= g[d];
         s += Math.sqrt(PHOTON_C * Math.max(s, 0)) * R.n() + NOISE_E[d] * R.n();
         det[d] = Math.min(MAX, s);
@@ -385,21 +407,38 @@
     };
     const hlaAuto = G.hlaCut === 'auto' ? auto('fmo_hla', 'BV786', 325) : Number(G.hlaCut);
     const cdAuto = G.cd11bCut === 'auto' ? auto('fmo_cd11b', 'PE-Cy7', 161) : Number(G.cd11bCut);
+    let hlaAlt = NaN, cdAlt = NaN;
+    if (p.includeFMO) {
+      const altPma = p.fmoCells !== 'pma';
+      const alt = [
+        { id: 'alt_fmo_hla', arm: 'fmo', label: 'HLA-DR FMO (other cells)', kind: 'fmo', cells: 'THP-1', pma: altPma, ifn: false, stain: { pi: true, cd11b: true, hla: false } },
+        { id: 'alt_fmo_cd11b', arm: 'fmo', label: 'CD11b FMO (other cells)', kind: 'fmo', cells: 'THP-1', pma: altPma, ifn: false, stain: { pi: true, cd11b: false, hla: true } }
+      ];
+      alt.forEach(t => { ev[t.id] = simulateTube(t, p, inst, seed * 1000 + tubeSalt(t.id) + 1); comp[t.id] = compensate(ev[t.id], Sused); gates[t.id] = gate(ev[t.id], comp[t.id], G); });
+      hlaAlt = auto('alt_fmo_hla', 'BV786', NaN);
+      cdAlt = auto('alt_fmo_cd11b', 'PE-Cy7', NaN);
+    }
     const cut = {
       hla: hlaAuto,
       cd11b: cdAuto,
+      hlaAlt, cd11bAlt: cdAlt,
+      fmoCells: p.fmoCells === 'pma' ? 'pma' : 'untreated',
       hlaFromFmo: !!(p.includeFMO && ev.fmo_hla),
       cd11bFromFmo: !!(p.includeFMO && ev.fmo_cd11b)
     };
     const outside = extrapolationReasons(p);
-    const results = tubes.map(t => ({ tube: t, ...stats(ev[t.id], comp[t.id], gates[t.id], cut), truth: t.cells === 'THP-1' && t.kind !== 'control' ? condition(p, t) : null, band: t.cells === 'THP-1' && t.kind !== 'control' && outside.length ? liveBand(p, t) : null }));
+    const results = tubes.map(t => {
+      const row = { tube: t, ...stats(ev[t.id], comp[t.id], gates[t.id], cut), truth: t.cells === 'THP-1' && t.kind !== 'control' ? condition(p, t) : null, band: t.cells === 'THP-1' && t.kind !== 'control' && outside.length ? liveBand(p, t) : null };
+      if (!t.stain || !t.stain.pi) { row.livePct = NaN; row.dimPct = NaN; row.brightPct = NaN; row.liveN = NaN; row.trueLivePct = NaN; }
+      return row;
+    });
     const checks = preflight(p, inst, G, results, notes, cut, outside);
-    return { protocol: p, instrument: inst, gates: G, tubes, ev, comp, gateRes: gates, spill: S, spillTrue: trueSpill(inst.sampleV), cut, results, checks, extrapolation: outside };
+    return { protocol: p, instrument: inst, gates: G, tubes, ev, comp, gateRes: gates, spill: S, spillTrue: trueSpill(inst.sampleV, p), cut, results, checks, extrapolation: outside };
   }
 
-  function trueSpill(V) {
+  function trueSpill(V, p) {
     const g = FLUORS.map(d => gain(d, V[d]));
-    return SPILL_REF.map((row, i) => row.map((s, j) => s * g[j] / g[i]));
+    return spillFor(p).map((row, i) => row.map((s, j) => s * g[j] / g[i]));
   }
 
   // ---------- pre-flight checks ----------
@@ -410,20 +449,22 @@
     Object.keys(inst.sampleV).forEach(ch => { const v = inst.sampleV[ch]; if (!(v >= 200 && v <= 900)) add('stop', `${ch} voltage is outside 200–900 V`, `Voltage ${v} is not a usable PMT setting. Gain at 0 V is not a real acquisition.`); });
     notes.forEach(n => add('warn', 'Compensation control', n));
     if (inst.compensation === 'none') add('stop', 'No compensation applied', 'PI spills about 79% into PE-Cy7. Without compensation the FMO gates move as well, so HLA-DR⁺ can fall toward 0% rather than rise. Neither the CD11b⁺ nor the HLA-DR⁺ percentage is interpretable.');
-    if (outside && outside.length) add('warn', 'Outside the calibrated range', `These settings were not in the 7 Sep, 29 Sep, 4 Oct or 12 Oct runs: ${outside.join('; ')}. The live % range in the table is what happens if those untested hazard coefficients move. It is not a confidence interval. Do not treat the point estimate as a result.`);
+    if (outside && outside.length) add('warn', 'Untested protocol', `No bench run has used these settings, so the point estimates are guesses: ${outside.join('; ')}. The live % range in the table is what happens if those untested hazard coefficients move. It is not a confidence interval.`);
     const by = id => results.find(r => r.tube.id === id);
     const pmaT = results.filter(r => r.tube.pma && r.tube.kind === 'sample');
     const maxPiSat = Math.max(...results.map(r => r.piSatPct));
     if (maxPiSat > 5) add('warn', 'PI detector saturating', `Up to ${maxPiSat.toFixed(0)}% of events sit at 262,143 in PI-A. Saturated events cannot be compensated. Lower the PI voltage by 30–60 V.`);
     const maxSsc = Math.max(...results.map(r => r.sscSatPct));
     if (maxSsc > 2) add('warn', 'SSC saturating', `Up to ${maxSsc.toFixed(0)}% of events are at the SSC ceiling (granular PMA or dead cells). Lower SSC voltage.`);
-    if (p.includeFMO && p.fmoCells === 'untreated' && pmaT.length) add('warn', 'FMOs made from undifferentiated cells', 'PMA cells are more autofluorescent; the HLA-DR gate from an untreated FMO can overcall HLA-DR⁺ in PMA tubes. Add PMA-cell FMOs.');
-    if (p.includeFMO && p.fmoCells === 'pma') add('info', 'One HLA-DR gate for every arm', 'The gate is set from PMA-cell FMOs and then applied to untreated and IFN-γ cells as well.');
+    const cellName = p.fmoCells === 'pma' ? 'PMA-cell' : 'untreated-cell';
+    const otherName = p.fmoCells === 'pma' ? 'untreated-cell' : 'PMA-cell';
+    if (p.includeFMO && p.fmoCells === 'untreated' && pmaT.length) add('warn', 'FMOs made from undifferentiated cells', `PMA cells are more autofluorescent in both CD11b and HLA-DR, so an untreated FMO sets both gates too low and overcalls positives in PMA tubes. A PMA-cell FMO would set HLA-DR⁺ > ${Math.round(cut.hlaAlt)} and CD11b⁺ > ${Math.round(cut.cd11bAlt)}, against ${Math.round(cut.hla)} and ${Math.round(cut.cd11b)} from the untreated FMO.`);
+    if (p.includeFMO && Number.isFinite(cut.hlaAlt)) add('info', 'One FMO gate for every arm', `The ${cellName} FMO sets HLA-DR⁺ > ${Math.round(cut.hla)} and CD11b⁺ > ${Math.round(cut.cd11b)} on untreated, IFN-γ and PMA tubes alike. A ${otherName} FMO would set HLA-DR⁺ > ${Math.round(cut.hlaAlt)} and CD11b⁺ > ${Math.round(cut.cd11bAlt)}. Untreated CD11b⁺ moves when only that gate changes.`);
     if (!p.includeFMO) add('stop', 'No FMO controls', 'Without FMOs there is no defensible HLA-DR⁺ or CD11b⁺ gate. Any cut-off shown is a fallback number, not a gate from this experiment.');
     if (!p.includeC1R) add('stop', 'No HLA-DR⁺ positive control', 'Without C1R (or another class II-high line) a failed HLA-DR stain looks like biology: every arm can read about 1% HLA-DR⁺ and nothing on the page proves the antibody worked.');
     add('info', 'No CD11b⁺ cell line', 'This panel has no CD11b positive-control cells. A weak CD11b stain can only be seen as a smaller positive percentage, which looks like a real result.');
     if (!p.includeUntreated) add('stop', 'No untreated control', 'Every treatment needs the untreated baseline beside it.');
-    if (p.replicates >= 2) add('info', 'Duplicates are sampling noise', 'The replicate tubes are two random draws from the same model. They are not biological replicates, so a tiny gap between them is not evidence the result is stable.');
+    if (p.replicates >= 2) add('info', 'Duplicates are technical repeats', 'Tubes marked technical a and technical b are two draws from the same culture. They are not biological replicates, so a gap of a few tenths of a percent is sampling noise.');
     else add('info', 'Single tubes', 'One tube cannot show whether a difference is bigger than sampling noise, and these duplicates would only show sampling noise anyway.');
     if (G.singLo >= G.singHi) add('stop', 'Singlet bounds are inverted', `H/A from ${G.singLo} to ${G.singHi} is an empty gate. Swap the bounds. Acquiring more events will not help.`);
     if (G.fscMin > 200000 || G.sscMin > 240000) add('stop', 'Cell gate is off the scale', 'Almost no events can fall inside this FSC/SSC gate. Lower the gate. Acquiring more events will not help.');
@@ -438,6 +479,8 @@
     if (!Number.isFinite(p.abQuality.hla) || p.abQuality.hla <= 0.3) add('stop', 'HLA-DR stain is not working', 'The HLA-DR antibody is set to weak or failed. Positives near 1% are the stain, not the cells. This is flagged even when the C1R tube is absent.');
     if (!Number.isFinite(p.abQuality.cd11b) || p.abQuality.cd11b < 0.1) add('stop', 'CD11b stain failed', 'CD11b antibody signal is at the failed-stain setting. PMA cells will not show their CD11b rise, and there is no CD11b⁺ control cell to catch it.');
     else if (p.abQuality.cd11b <= 0.3) add('warn', 'CD11b stain weak', 'CD11b antibody signal is below the working titration. PMA CD11b⁺ drops even though the biology is unchanged, and this panel has no CD11b⁺ control cell.');
+    if (!p.mycoTested) add('warn', 'Mycoplasma not tested', `Passage ${p.passage}, mycoplasma untested. That is an unknown, not a cause of death: an infection could also shift HLA-DR and CD11b. The model adds no death penalty for it, and this design is not Ready until the culture is tested.`);
+    if ((p.viability || 'PI') === 'PI') add('info', 'PI spills into the CD11b channel', 'PI spills about 79% into PE-Cy7 and 18% into BV786. PI-negative cells are mostly clear of that, but PI-dim cells smear into PE-Cy7. DAPI or a fixable near-IR dye, under Viability dye, keeps that smear out of CD11b.');
     if (p.ifnTiming === 'together' && p.pmaDose > 0) add('warn', 'IFN-γ added with PMA', 'The model predicts heavy death in the PMA + IFN-γ arm. Wash out PMA and rest 24 h first.');
     if (p.detach === 'scrape' || p.detach === 'trypsin') add('warn', `Detaching with ${p.detach === 'scrape' ? 'a scraper' : 'trypsin'}`, 'Expect extra PI⁺ PMA cells after harvest. Cold PBS-EDTA or Accutase is gentler.');
     if (p.piTiming === 'early') add('info', 'PI added early', 'PI-dim counts rise with incubation time; add PI just before acquisition.');

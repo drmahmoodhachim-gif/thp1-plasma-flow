@@ -3,7 +3,7 @@
   'use strict';
   const E = window.SimEngine;
   const $ = (id) => document.getElementById(id);
-  const ENGINE_VERSION = 'sim-1.1 (ranges, gates, signed notebook)';
+  const ENGINE_VERSION = 'sim-1.2 (HLA-DR autofluorescence, untested labels)';
   const CH = ['FSC', 'SSC', 'PI', 'PE-Cy7', 'BV786'];
 
   // ---------- presets ----------
@@ -19,7 +19,7 @@
   // ---------- form <-> settings ----------
   const P_NUM = ['pmaDose', 'pmaHours', 'restHours', 'ifnDose', 'ifnHours', 'seedDensity', 'serum', 'passage', 'delayMin', 'washes'];
   const P_BOOL = ['washAfterPMA', 'poolFloaters', 'mycoTested'];
-  const P_STR = ['ifnTiming', 'detach', 'temp', 'piTiming', 'fmoCells'];
+  const P_STR = ['ifnTiming', 'detach', 'temp', 'piTiming', 'fmoCells', 'viability'];
   const P_CHECK = ['includeUntreated', 'includeFMO', 'includeC1R'];
   const G_NUM = ['fscMin', 'sscMin', 'singLo', 'singHi', 'piCut'];
 
@@ -36,7 +36,7 @@
     CH.forEach(c => { $('vs' + c).value = i.sampleV[c]; $('vc' + c).value = (i.sameVoltages ? i.sampleV : i.controlV)[c]; });
     $('sameVoltages').checked = i.sameVoltages; $('events').value = String(i.events); $('compensation').value = i.compensation;
     G_NUM.forEach(k => $(k).value = g[k]); $('seed').value = s.seed;
-    syncVoltC();
+    syncVoltC(); syncDyeLabels();
   }
   const LIMITS = {
     pmaDose: [0, 500, 'PMA, ng/mL'], pmaHours: [0, 96, 'PMA, hours'], restHours: [0, 96, 'Rest, hours'],
@@ -78,6 +78,7 @@
     if (![5000, 10000, 20000].includes(events)) errors.push('Events per tube must be 5,000, 10,000 or 20,000.');
     const instrument = { sampleV, controlV: same ? { ...sampleV } : controlV, sameVoltages: same, events, compensation: $('compensation').value, threshold: 5000 };
     if (!['controls', 'none'].includes(instrument.compensation)) errors.push('Compensation must be from single stains or none.');
+    if (!['PI', 'DAPI', 'fixable'].includes(p.viability)) errors.push('Viability dye must be PI, DAPI or a fixable near-IR dye.');
     const gates = { ...E.DEFAULT_GATES };
     G_NUM.forEach(k => { const spec = LIMITS[k]; gates[k] = readBounded(k, spec[0], spec[1], spec[2], errors); });
     if (gates.singLo != null && gates.singHi != null && gates.singLo >= gates.singHi) errors.push('Singlet bounds are inverted: the lower H/A bound must be below the upper bound.');
@@ -108,7 +109,14 @@
     });
     return problems;
   }
+  function dyeLabel(v) { return v === 'DAPI' ? 'DAPI' : v === 'fixable' ? 'Fixable' : 'PI'; }
+  function dyeName() { return dyeLabel(R && R.protocol && R.protocol.viability); }
   function syncVoltC() { const same = $('sameVoltages').checked; CH.forEach(c => { const el = $('vc' + c); el.disabled = same; if (same) el.value = $('vs' + c).value; }); }
+  function syncDyeLabels() {
+    const name = dyeLabel($('viability').value);
+    ['vsPI', 'vcPI'].forEach(id => { const lab = document.querySelector(`label[for="${id}"]`); if (lab) lab.firstChild.textContent = (id === 'vcPI' ? 'Controls ' : '') + name + ', V'; });
+    const timing = document.querySelector('label[for="piTiming"]'); if (timing) timing.textContent = name + ' added';
+  }
 
   // ---------- run ----------
   let R = null, currentPreset = 'oct12';
@@ -179,14 +187,19 @@
         <td class="${r.piSatPct > 5 ? 'bad' : ''}">${f1(r.piSatPct)}</td><td class="${r.trueLivePct < 90 ? 'bad' : ''}">${ctl || !Number.isFinite(r.trueLivePct) ? '–' : f1(r.trueLivePct) + '%'}</td></tr>`;
     }).join('');
     $('resTable').innerHTML = head + '<tbody>' + rows + '</tbody>';
-    const hlaGate = R.cut.hlaFromFmo ? `HLA-DR⁺ > ${f0(R.cut.hla)} from the FMO` : `HLA-DR⁺ > ${f0(R.cut.hla)} is a fallback, not an FMO gate`;
-    const cdGate = R.cut.cd11bFromFmo ? `CD11b⁺ > ${f0(R.cut.cd11b)} from the FMO` : `CD11b⁺ > ${f0(R.cut.cd11b)} is a fallback, not an FMO gate`;
-    $('cutText').textContent = `${hlaGate} · ${cdGate} · live PI < ${f0(R.gates.piCut)}`;
+    const used = R.cut.fmoCells === 'pma' ? 'PMA-cell FMO' : 'untreated-cell FMO';
+    const other = R.cut.fmoCells === 'pma' ? 'untreated-cell FMO' : 'PMA-cell FMO';
+    const alt = (n, v) => Number.isFinite(v) ? ` (${other} would set ${n} > ${f0(v)})` : '';
+    const hlaGate = R.cut.hlaFromFmo ? `HLA-DR⁺ > ${f0(R.cut.hla)} from the ${used}${alt('HLA-DR⁺', R.cut.hlaAlt)}` : `HLA-DR⁺ > ${f0(R.cut.hla)} is a fallback, not an FMO gate`;
+    const cdGate = R.cut.cd11bFromFmo ? `CD11b⁺ > ${f0(R.cut.cd11b)} from the ${used}${alt('CD11b⁺', R.cut.cd11bAlt)}` : `CD11b⁺ > ${f0(R.cut.cd11b)} is a fallback, not an FMO gate`;
+    $('cutText').textContent = `${hlaGate} · ${cdGate} · live ${dyeName()} < ${f0(R.gates.piCut)}`;
     const outside = R.extrapolation && R.extrapolation.length;
+    $('resTag').hidden = !outside;
+    $('resTag').textContent = outside ? 'Untested' : '';
     $('calNote').textContent = cal
-      ? 'Numbers in brackets are the real 12 Oct 2026 measurements for the same arm (duplicates averaged). Close agreement is what the model was tuned for.'
+      ? 'Numbers in brackets are the real 12 Oct 2026 measurements for the same arm (technical duplicates averaged). Close agreement is what the model was tuned for.'
       : outside
-        ? 'A range under Live % is the biological survival if the untested hazard coefficients move. It is not a confidence interval, and it is not the gated percentage.'
+        ? 'Untested. No bench run has used this protocol. The range under Live % is the biological survival if the untested hazard coefficients move. It is not a confidence interval, and the point estimate is a guess.'
         : 'Live % and positives are on single cells. Truly live in the live gate is how many of those events are really live in the simulation.';
   }
   function liveCell(r, realHtml) {
@@ -212,7 +225,7 @@
       return `<div class="whyrow"><span>${names[arm] || arm}</span><div class="whybar" role="img" aria-label="${names[arm]}: ${dead.toFixed(0)}% dead">${segs}</div><span>${dead.toFixed(0)}% dead</span></div>`;
     }).join('');
     const leg = [...used].map(k => `<span><i style="background:${CAUSE[k][1]}"></i>${CAUSE[k][0]}</span>`).join('');
-    $('why').innerHTML = rows + `<div class="whyleg">${leg}</div><p class="hint">Bar length is the model’s death fraction before gating and before debris is removed. It will not match PI-dim plus dead in the table, which are counted on single cells after the gates. Hover a segment for its share of the model’s death.</p>`;
+    $('why').innerHTML = rows + `<div class="whyleg">${leg}</div><p class="hint">This split is an assumption, not a finding. Four runs fit the total death in each arm; they cannot separate handling, PMA, detaching, floaters and IFN-γ. Bar length is that fitted total, before gating and before debris is removed, so it will not match PI-dim plus dead in the table. Hover a segment for its assumed share.</p>`;
   }
 
   function renderTubeSel() {
@@ -271,7 +284,8 @@
     const pc = (num, den) => den ? (100 * num / den).toFixed(1) : '–';
     plot(mk('FSC-A vs SSC-A', `Ungated · ${ev.n.toLocaleString()} events · Cells ${pc(g.cells, ev.n)}%`), pick(all, ev['FSC-A']), pick(all, ev['SSC-A']), { ...lin, xl: 'FSC-A', yl: 'SSC-A', truth: tr(all), gates: (c, X, Y) => { c.beginPath(); c.moveTo(X(G.fscMin), Y(262144)); c.lineTo(X(G.fscMin), Y(G.sscMin)); c.lineTo(X(262144), Y(G.sscMin)); c.stroke(); c.textAlign = 'left'; c.fillText('Cells', X(G.fscMin) + 6, Y(240000)); } });
     plot(mk('FSC-A vs FSC-H', `Cells · Single cells ${pc(g.sing, g.cells)}%`), pick(cellsI, ev['FSC-A']), pick(cellsI, ev['FSC-H']), { ...lin, xl: 'FSC-A', yl: 'FSC-H', truth: tr(cellsI), gates: (c, X, Y) => { [G.singLo, G.singHi].forEach(r => { c.beginPath(); c.moveTo(X(0), Y(0)); c.lineTo(X(262144), Y(262144 * r)); c.stroke(); }); c.textAlign = 'left'; c.fillText('Single cells', X(8000), Y(235000)); } });
-    plot(mk('Comp-PI-A vs SSC-A', `Single cells · Live ${f1(res.livePct)}% · PI dim ${f1(res.dimPct)}% · dead ${f1(res.brightPct)}%`), pick(singI, comp.PI), pick(singI, ev['SSC-A']), { xs: asinh, x0: fl.x0, x1: fl.x1, ys: v => v, y0: 0, y1: 262144, xlog: true, xl: 'Comp-PI-A', yl: 'SSC-A', truth: tr(singI), gates: (c, X, Y) => { c.beginPath(); c.moveTo(X(G.piCut), Y(0)); c.lineTo(X(G.piCut), Y(262144)); c.stroke(); c.setLineDash([5, 4]); c.beginPath(); c.moveTo(X(20000), Y(0)); c.lineTo(X(20000), Y(262144)); c.stroke(); c.setLineDash([]); c.textAlign = 'right'; c.fillText('Live', X(G.piCut) - 6, Y(245000)); c.textAlign = 'left'; c.fillText('PI dim', X(G.piCut) + 6, Y(245000)); } });
+    const dye = dyeName();
+    plot(mk(`Comp-${dye}-A vs SSC-A`, `Single cells · Live ${f1(res.livePct)}% · ${dye} dim ${f1(res.dimPct)}% · dead ${f1(res.brightPct)}%`), pick(singI, comp.PI), pick(singI, ev['SSC-A']), { xs: asinh, x0: fl.x0, x1: fl.x1, ys: v => v, y0: 0, y1: 262144, xlog: true, xl: `Comp-${dye}-A`, yl: 'SSC-A', truth: tr(singI), gates: (c, X, Y) => { c.beginPath(); c.moveTo(X(G.piCut), Y(0)); c.lineTo(X(G.piCut), Y(262144)); c.stroke(); c.setLineDash([5, 4]); c.beginPath(); c.moveTo(X(20000), Y(0)); c.lineTo(X(20000), Y(262144)); c.stroke(); c.setLineDash([]); c.textAlign = 'right'; c.fillText('Live', X(G.piCut) - 6, Y(245000)); c.textAlign = 'left'; c.fillText(dye + ' dim', X(G.piCut) + 6, Y(245000)); } });
     plot(mk('Comp-BV786-A (HLA-DR) vs Comp-PE-Cy7-A (CD11b)', `Live · ${g.live.toLocaleString()} cells · HLA-DR⁺ ${f1(res.hlaPos)}% · CD11b⁺ ${f1(res.cd11bPos)}%`), pick(liveI, comp.BV786), pick(liveI, comp['PE-Cy7']), { xs: asinh, x0: fl.x0, x1: fl.x1, ys: asinh, y0: fl.x0, y1: fl.x1, xlog: true, ylog: true, xl: 'Comp-BV786-A :: HLA-DR', yl: 'Comp-PE-Cy7-A :: CD11b', truth: tr(liveI), gates: (c, X, Y, m, pw, ph) => { c.beginPath(); c.moveTo(X(R.cut.hla), m.t); c.lineTo(X(R.cut.hla), m.t + ph); c.moveTo(m.l, Y(R.cut.cd11b)); c.lineTo(m.l + pw, Y(R.cut.cd11b)); c.stroke(); } });
   }
 
@@ -382,6 +396,7 @@
     document.querySelector('.side').addEventListener('input', markEdited);
     document.querySelector('.side').addEventListener('change', markEdited);
     $('sameVoltages').addEventListener('change', syncVoltC);
+    $('viability').addEventListener('change', syncDyeLabels);
     CH.forEach(c => $('vs' + c).addEventListener('input', syncVoltC));
     $('runBtn').addEventListener('click', runNow);
     $('resetBtn').addEventListener('click', resetToStart);

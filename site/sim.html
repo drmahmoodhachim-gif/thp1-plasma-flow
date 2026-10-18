@@ -80,6 +80,7 @@
       <div class="grid2">
         <div class="field"><label for="events">Events per tube</label><select id="events"><option value="5000">5,000</option><option value="10000">10,000</option><option value="20000">20,000</option></select></div>
         <div class="field"><label for="compensation">Compensation</label><select id="compensation"><option value="controls">From single stains</option><option value="none">None</option></select></div>
+        <div class="field"><label for="viability">Viability dye</label><select id="viability"><option value="PI">PI</option><option value="DAPI">DAPI (violet, low PE-Cy7 spill)</option><option value="fixable">Fixable near-IR</option></select></div>
       </div>
     </details>
 
@@ -110,13 +111,13 @@
     </section>
 
     <section class="card result" aria-labelledby="res-h">
-      <div class="card-head"><h2 id="res-h">Virtual results</h2><span class="hint" id="cutText"></span></div>
+      <div class="card-head"><h2 id="res-h">Virtual results</h2><span id="resTag" class="pill" hidden>Untested</span><span class="hint" id="cutText"></span></div>
       <div class="tbl"><table id="resTable"></table></div>
       <p class="hint" id="calNote"></p>
     </section>
 
     <section class="card result" aria-labelledby="why-h">
-      <div class="card-head"><h2 id="why-h">Why cells died in each arm</h2><span class="hint">share of death hazard by cause</span></div>
+      <div class="card-head"><h2 id="why-h">Why cells died in each arm</h2><span class="hint">assumed split of a fitted total</span></div>
       <div id="why" class="why"></div>
     </section>
 
@@ -183,13 +184,13 @@
       <div class="tbl"><table id="cmpTable"></table></div>
     </section>
 
-    <p class="foot">The viability model was fitted to four runs from this lab (7 Sep, 29 Sep, 4 Oct and 12 Oct 2026), not to published constants. A protocol that changes dose, wash, rest, detachment or timing is outside that fit: the table then shows a range, and pre-flight will not say Ready. Use it to choose what to test. The bench decides what is true.</p>
+    <p class="foot">The viability model was fitted to four runs from this lab (7 Sep, 29 Sep, 4 Oct and 12 Oct 2026), not to published constants. Rest-then-IFN-γ, EDTA detachment and any other change from those runs are untested: the table then shows a range, the results are marked Untested, and pre-flight will not say Ready. Use it to choose what to test. The bench decides what is true.</p>
   </main>
 </div>
 <!--SIM-BODY-END-->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script src="config.js"></script>
-<script src="sim/engine.js?v=3"></script>
-<script src="sim/ui.js?v=3"></script>
+<script src="sim/engine.js?v=4"></script>
+<script src="sim/ui.js?v=4"></script>
 </body>
 </html>
