@@ -10,7 +10,8 @@
  *
  * Calibration: with the default ("as run on 12 Oct 2026") protocol and voltages, the simulated tubes reproduce
  * the measured 12 Oct values (see CALIBRATION below and tests/calibrate.mjs).
- * Model coefficients are estimates fitted to two real runs, not published constants.
+ * Model coefficients are estimates fitted to four runs from this lab (7 Sep, 29 Sep, 4 Oct and 12 Oct 2026),
+ * not published constants. Anything outside that 12 Oct protocol is an extrapolation: see extrapolationReasons().
  *
  * Works in the browser (window.SimEngine) and in Node (module.exports).
  */
@@ -69,7 +70,7 @@
 
   // ---------- biology ----------
   /** Returns the cause-by-cause death hazards and expression parameters for one condition. */
-  function condition(p, arm) {
+  function condition(p, arm, scale) {
     const pma = arm.pma, ifn = arm.ifn;
     const H = {};      // hazards (−ln survival), each with a "slow" (culture, apoptosis-like) or "fast" (mechanical) character
     // baseline culture and handling
@@ -98,6 +99,7 @@
       const pmaF = Math.pow(Math.max(p.pmaDose, 0) / 100, 0.7);
       H.combo = 2.75 * (hill(p.ifnDose, 10) / hill(50, 10)) * timingF * pmaF * Math.min(1.5, ifnHours / 48);
     }
+    if (scale) for (const k of Object.keys(H)) if (scale[k]) H[k] *= scale[k];
     const slowKeys = ['baseline', 'serum', 'passage', 'myco', 'density', 'ifn', 'pmaCulture', 'combo', 'piEarly'];
     let total = 0, dimW = 0;
     for (const [k, v] of Object.entries(H)) {
@@ -121,6 +123,51 @@
     const hlaBase = 25 * (1 + 1.6 * ifnEff);
     const shrink = Math.exp(-0.6 * comboH);
     return { H, total, live, dim, bright, pmaEff, ifnEff, cd11bMed, hlaResp, hlaBase, shrink, survivorHealth };
+  }
+
+  /** Settings that differ from the 12 Oct protocol the viability model was fitted to. */
+  function extrapolationReasons(p) {
+    const d = DEFAULT_PROTOCOL;
+    const r = [];
+    const add = (on, text) => { if (on) r.push(text); };
+    add(p.pmaDose !== d.pmaDose, `PMA dose ${p.pmaDose} ng/mL (the fitted PMA arms used 100 ng/mL; in this model differentiation is nearly saturated by about 10 ng/mL, so 10 and 100 look alike)`);
+    add(p.pmaHours !== d.pmaHours, `PMA time ${p.pmaHours} h (fitted at 48 h, and the PMA effect is fully on by 24 h)`);
+    add(!!p.washAfterPMA, 'washing PMA out was not in the fitted runs');
+    add(p.restHours > 0, `resting ${p.restHours} h after PMA was not in the fitted runs`);
+    add(p.ifnDose !== d.ifnDose, `IFN-γ dose ${p.ifnDose} ng/mL (fitted at 50 ng/mL)`);
+    add(p.ifnHours !== d.ifnHours, `IFN-γ time ${p.ifnHours} h (fitted at 48 h)`);
+    add(p.ifnTiming !== 'together', 'adding IFN-γ after PMA was not in the fitted runs');
+    add(p.detach !== 'scrape', `detaching with ${p.detach} was not in the fitted runs (those used a scraper)`);
+    add(!p.poolFloaters, 'leaving floating cells behind was not in the fitted runs');
+    add(p.washes !== d.washes, `${p.washes} washes (fitted at 3; fewer washes do not add unbound-antibody background in this model)`);
+    add(p.serum !== d.serum, `serum ${p.serum}% (fitted at 10%; serum above 10% has no effect in this model)`);
+    add(p.passage !== d.passage, `passage ${p.passage} (fitted near passage 15)`);
+    add(p.seedDensity !== d.seedDensity, `seeding ${p.seedDensity} million/mL (fitted at 0.5)`);
+    add(!p.mycoTested, '“mycoplasma not tested” is not an unknown here: the model adds an infection penalty');
+    add(p.delayMin !== d.delayMin || p.temp !== d.temp, 'the wait before acquisition differs from the fitted run');
+    add(p.piTiming !== d.piTiming, 'PI added with the antibodies was not how the fitted runs were stained');
+    return r;
+  }
+
+  /** Biological live-fraction bounds if the untested hazard coefficients move. Not a confidence interval. */
+  function liveBand(p, arm) {
+    const mid = condition(p, arm);
+    if (!extrapolationReasons(p).length) return { lo: mid.live, hi: mid.live, mid: mid.live };
+    const optimistic = condition(p, arm, { pmaCulture: 0.35, harvest: 0.35, combo: 0.25, floaters: 0.35, ifn: 0.5, baseline: 0.7 });
+    const pessimistic = condition(p, arm, { pmaCulture: 2.4, harvest: 2.8, combo: 3.2, floaters: 2.2, ifn: 2, baseline: 1.4 });
+    const lives = [mid.live, optimistic.live, pessimistic.live].filter(Number.isFinite).sort((a, b) => a - b);
+    return { lo: lives[0], hi: lives[lives.length - 1], mid: mid.live };
+  }
+
+  // Stable per tube id. The default 14-tube layout keeps the salts used for the 12 Oct calibration,
+  // so removing an earlier tube does not reshuffle every later tube's random draws.
+  function tubeSalt(id) {
+    const order = ['untreated', 'ifn_a', 'ifn_b', 'pma_a', 'pma_b', 'combo_a', 'combo_b', 'fmo_hla', 'fmo_cd11b', 'c1r', 'cc_unstained', 'cc_pi', 'cc_pecy7', 'cc_bv786'];
+    const i = order.indexOf(id);
+    if (i >= 0) return i * 17;
+    let h = 2166136261;
+    for (let c = 0; c < String(id).length; c++) h = Math.imul(h ^ String(id).charCodeAt(c), 16777619);
+    return (h >>> 0) % 9973;
   }
 
   // ---------- tubes ----------
@@ -318,13 +365,14 @@
   // ---------- whole experiment ----------
   function run(protocolIn, instrumentIn, gatesIn, seed = 12) {
     const p = { ...DEFAULT_PROTOCOL, ...protocolIn, abQuality: { ...DEFAULT_PROTOCOL.abQuality, ...(protocolIn && protocolIn.abQuality) } };
+    if (!Number.isFinite(p.abQuality.hla) || !Number.isFinite(p.abQuality.cd11b)) throw new Error('Antibody quality must be a finite number.');
     const inst = { ...DEFAULT_INSTRUMENT, ...instrumentIn };
     inst.sampleV = { ...REF_V, ...(instrumentIn && instrumentIn.sampleV) };
     inst.controlV = inst.sameVoltages ? { ...inst.sampleV } : { ...REF_V, ...(instrumentIn && instrumentIn.controlV) };
     const G = { ...DEFAULT_GATES, ...gatesIn };
     const tubes = buildTubes(p);
     const ev = {};
-    tubes.forEach((t, k) => { ev[t.id] = simulateTube(t, p, inst, seed * 1000 + k * 17 + 1); });
+    tubes.forEach((t) => { ev[t.id] = simulateTube(t, p, inst, seed * 1000 + tubeSalt(t.id) + 1); });
     const { S, notes } = measureSpill(ev);
     const Sused = inst.compensation === 'none' ? [[1, 0, 0], [0, 1, 0], [0, 0, 1]] : S;
     const comp = {}; const gates = {};
@@ -335,13 +383,18 @@
       const v = []; const g = gates[fmoId]; for (let i = 0; i < g.n; i++) if (g.cls[i] >= 2 && comp[fmoId].PI[i] < Math.min(G.piCut, 1000)) v.push(comp[fmoId][ch][i]);
       return v.length > 50 ? pct(v, 99) : fallback;
     };
+    const hlaAuto = G.hlaCut === 'auto' ? auto('fmo_hla', 'BV786', 325) : Number(G.hlaCut);
+    const cdAuto = G.cd11bCut === 'auto' ? auto('fmo_cd11b', 'PE-Cy7', 161) : Number(G.cd11bCut);
     const cut = {
-      hla: G.hlaCut === 'auto' ? auto('fmo_hla', 'BV786', 325) : Number(G.hlaCut),
-      cd11b: G.cd11bCut === 'auto' ? auto('fmo_cd11b', 'PE-Cy7', 161) : Number(G.cd11bCut)
+      hla: hlaAuto,
+      cd11b: cdAuto,
+      hlaFromFmo: !!(p.includeFMO && ev.fmo_hla),
+      cd11bFromFmo: !!(p.includeFMO && ev.fmo_cd11b)
     };
-    const results = tubes.map(t => ({ tube: t, ...stats(ev[t.id], comp[t.id], gates[t.id], cut), truth: t.cells === 'THP-1' && t.kind !== 'control' ? condition(p, t) : null }));
-    const checks = preflight(p, inst, G, results, notes, cut);
-    return { protocol: p, instrument: inst, gates: G, tubes, ev, comp, gateRes: gates, spill: S, spillTrue: trueSpill(inst.sampleV), cut, results, checks };
+    const outside = extrapolationReasons(p);
+    const results = tubes.map(t => ({ tube: t, ...stats(ev[t.id], comp[t.id], gates[t.id], cut), truth: t.cells === 'THP-1' && t.kind !== 'control' ? condition(p, t) : null, band: t.cells === 'THP-1' && t.kind !== 'control' && outside.length ? liveBand(p, t) : null }));
+    const checks = preflight(p, inst, G, results, notes, cut, outside);
+    return { protocol: p, instrument: inst, gates: G, tubes, ev, comp, gateRes: gates, spill: S, spillTrue: trueSpill(inst.sampleV), cut, results, checks, extrapolation: outside };
   }
 
   function trueSpill(V) {
@@ -350,12 +403,14 @@
   }
 
   // ---------- pre-flight checks ----------
-  function preflight(p, inst, G, results, notes, cut) {
+  function preflight(p, inst, G, results, notes, cut, outside) {
     const C = []; const add = (lvl, title, body) => C.push({ lvl, title, body });
     const diffV = Object.keys(REF_V).filter(ch => Math.round(inst.sampleV[ch]) !== Math.round(inst.controlV[ch]));
     if (diffV.length) add('stop', 'Controls run at different voltages', `${diffV.join(', ')} differ between controls and samples. Spillover measured on the controls will not match the samples, and control-based cut-offs move. Re-run the controls at the sample voltages.`);
+    Object.keys(inst.sampleV).forEach(ch => { const v = inst.sampleV[ch]; if (!(v >= 200 && v <= 900)) add('stop', `${ch} voltage is outside 200–900 V`, `Voltage ${v} is not a usable PMT setting. Gain at 0 V is not a real acquisition.`); });
     notes.forEach(n => add('warn', 'Compensation control', n));
-    if (inst.compensation === 'none') add('stop', 'No compensation applied', 'PI spills about 79% into PE-Cy7 and PE-Cy7 about 12% into BV786 at these voltages. Dead cells will look CD11b⁺ and HLA-DR⁺.');
+    if (inst.compensation === 'none') add('stop', 'No compensation applied', 'PI spills about 79% into PE-Cy7. Without compensation the FMO gates move as well, so HLA-DR⁺ can fall toward 0% rather than rise. Neither the CD11b⁺ nor the HLA-DR⁺ percentage is interpretable.');
+    if (outside && outside.length) add('warn', 'Outside the calibrated range', `These settings were not in the 7 Sep, 29 Sep, 4 Oct or 12 Oct runs: ${outside.join('; ')}. The live % range in the table is what happens if those untested hazard coefficients move. It is not a confidence interval. Do not treat the point estimate as a result.`);
     const by = id => results.find(r => r.tube.id === id);
     const pmaT = results.filter(r => r.tube.pma && r.tube.kind === 'sample');
     const maxPiSat = Math.max(...results.map(r => r.piSatPct));
@@ -363,14 +418,26 @@
     const maxSsc = Math.max(...results.map(r => r.sscSatPct));
     if (maxSsc > 2) add('warn', 'SSC saturating', `Up to ${maxSsc.toFixed(0)}% of events are at the SSC ceiling (granular PMA or dead cells). Lower SSC voltage.`);
     if (p.includeFMO && p.fmoCells === 'untreated' && pmaT.length) add('warn', 'FMOs made from undifferentiated cells', 'PMA cells are more autofluorescent; the HLA-DR gate from an untreated FMO can overcall HLA-DR⁺ in PMA tubes. Add PMA-cell FMOs.');
-    if (!p.includeFMO) add('stop', 'No FMO controls', 'Without FMOs there is no defensible HLA-DR⁺ or CD11b⁺ gate.');
-    if (!p.includeC1R) add('info', 'No HLA-DR⁺ positive control', 'C1R (or another class II-high line) proves the antibody and detector work on the day.');
+    if (p.includeFMO && p.fmoCells === 'pma') add('info', 'One HLA-DR gate for every arm', 'The gate is set from PMA-cell FMOs and then applied to untreated and IFN-γ cells as well.');
+    if (!p.includeFMO) add('stop', 'No FMO controls', 'Without FMOs there is no defensible HLA-DR⁺ or CD11b⁺ gate. Any cut-off shown is a fallback number, not a gate from this experiment.');
+    if (!p.includeC1R) add('stop', 'No HLA-DR⁺ positive control', 'Without C1R (or another class II-high line) a failed HLA-DR stain looks like biology: every arm can read about 1% HLA-DR⁺ and nothing on the page proves the antibody worked.');
+    add('info', 'No CD11b⁺ cell line', 'This panel has no CD11b positive-control cells. A weak CD11b stain can only be seen as a smaller positive percentage, which looks like a real result.');
     if (!p.includeUntreated) add('stop', 'No untreated control', 'Every treatment needs the untreated baseline beside it.');
-    if (p.replicates < 2) add('info', 'Single tubes', 'Duplicates show whether a difference is bigger than tube-to-tube noise.');
+    if (p.replicates >= 2) add('info', 'Duplicates are sampling noise', 'The replicate tubes are two random draws from the same model. They are not biological replicates, so a tiny gap between them is not evidence the result is stable.');
+    else add('info', 'Single tubes', 'One tube cannot show whether a difference is bigger than sampling noise, and these duplicates would only show sampling noise anyway.');
+    if (G.singLo >= G.singHi) add('stop', 'Singlet bounds are inverted', `H/A from ${G.singLo} to ${G.singHi} is an empty gate. Swap the bounds. Acquiring more events will not help.`);
+    if (G.fscMin > 200000 || G.sscMin > 240000) add('stop', 'Cell gate is off the scale', 'Almost no events can fall inside this FSC/SSC gate. Lower the gate. Acquiring more events will not help.');
+    if (p.pmaDose < 0) add('stop', 'PMA dose is negative', 'A negative dose is not a culture condition. It was being treated as 0.');
+    if (p.seedDensity <= 0) add('stop', 'Seeding density is zero', 'A flask at 0 cells/mL cannot yield a full tube of events.');
+    if (p.ifnDose > 500) add('stop', 'IFN-γ dose is above 500 ng/mL', 'Higher doses sit on the flat top of the model curve, so 1 mg/mL looks like a modest dose. That is not a prediction.');
     if (G.piCut > 2000) add('stop', 'Live gate includes PI-dim cells', `PI cut-off ${G.piCut}. Dying, PI-dim cells read as HLA-DR⁺ without antibody (83% in the 12 Oct FMO). Keep the live gate below about 1,000.`);
-    results.filter(r => r.tube.kind === 'sample' && r.liveN < 1000).forEach(r => add('warn', `${r.tube.label}: only ${r.liveN.toLocaleString()} live cells`, 'Percentages on so few cells are fragile. Acquire more events or improve viability.'));
+    results.filter(r => r.tube.kind === 'sample' && Number.isFinite(r.trueLivePct) && r.trueLivePct < 80).forEach(r => add('stop', `${r.tube.label}: live gate is not live cells`, `Only ${r.trueLivePct.toFixed(0)}% of events inside the live gate are truly live in the simulation. Percentages on that gate describe the wrong cells. Tighten the PI cut or change the protocol.`));
+    const gateBroken = G.singLo >= G.singHi || G.fscMin > 200000 || G.sscMin > 240000;
+    if (!gateBroken) results.filter(r => r.tube.kind === 'sample' && r.liveN < 1000).forEach(r => add('warn', `${r.tube.label}: only ${r.liveN.toLocaleString()} live cells`, 'Percentages on so few cells are fragile. Acquire more events or improve viability.'));
     const c1r = by('c1r'); if (c1r && c1r.hlaMed < 10000) add('stop', 'C1R is dim', `C1R HLA-DR median ${Math.round(c1r.hlaMed).toLocaleString()} (expected ≈70,000). The HLA-DR stain is failing, as on 4 Oct.`);
-    if (p.abQuality.cd11b < 0.3) add('warn', 'CD11b stain weak', 'CD11b antibody signal is set low; PMA cells will not show their CD11b rise.');
+    if (!Number.isFinite(p.abQuality.hla) || p.abQuality.hla <= 0.3) add('stop', 'HLA-DR stain is not working', 'The HLA-DR antibody is set to weak or failed. Positives near 1% are the stain, not the cells. This is flagged even when the C1R tube is absent.');
+    if (!Number.isFinite(p.abQuality.cd11b) || p.abQuality.cd11b < 0.1) add('stop', 'CD11b stain failed', 'CD11b antibody signal is at the failed-stain setting. PMA cells will not show their CD11b rise, and there is no CD11b⁺ control cell to catch it.');
+    else if (p.abQuality.cd11b <= 0.3) add('warn', 'CD11b stain weak', 'CD11b antibody signal is below the working titration. PMA CD11b⁺ drops even though the biology is unchanged, and this panel has no CD11b⁺ control cell.');
     if (p.ifnTiming === 'together' && p.pmaDose > 0) add('warn', 'IFN-γ added with PMA', 'The model predicts heavy death in the PMA + IFN-γ arm. Wash out PMA and rest 24 h first.');
     if (p.detach === 'scrape' || p.detach === 'trypsin') add('warn', `Detaching with ${p.detach === 'scrape' ? 'a scraper' : 'trypsin'}`, 'Expect extra PI⁺ PMA cells after harvest. Cold PBS-EDTA or Accutase is gentler.');
     if (p.piTiming === 'early') add('info', 'PI added early', 'PI-dim counts rise with incubation time; add PI just before acquisition.');
@@ -399,6 +466,6 @@
     return buf;
   }
 
-  const api = { REF_V, K_EXP, MAX, FLUORS, SPILL_REF, DEFAULT_PROTOCOL, DEFAULT_INSTRUMENT, DEFAULT_GATES, CALIBRATION, condition, buildTubes, simulateTube, run, compensate, toFCS, median, pct };
+  const api = { REF_V, K_EXP, MAX, FLUORS, SPILL_REF, DEFAULT_PROTOCOL, DEFAULT_INSTRUMENT, DEFAULT_GATES, CALIBRATION, condition, extrapolationReasons, liveBand, tubeSalt, buildTubes, simulateTube, run, compensate, toFCS, median, pct };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.SimEngine = api;
 })(typeof window !== 'undefined' ? window : globalThis);

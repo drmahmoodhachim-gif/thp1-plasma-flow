@@ -103,23 +103,24 @@
   </aside>
 
   <main class="main">
-    <section class="card" aria-labelledby="pf-h">
+    <p id="staleNote" class="stale-note" hidden>Settings have changed. The checks, table and plots below are from the previous run until you press Run.</p>
+    <section class="card result" aria-labelledby="pf-h">
       <div class="card-head"><h2 id="pf-h">Pre-flight check</h2><span id="pfSummary" class="pill"></span></div>
       <ul id="checks" class="checklist"></ul>
     </section>
 
-    <section class="card" aria-labelledby="res-h">
+    <section class="card result" aria-labelledby="res-h">
       <div class="card-head"><h2 id="res-h">Virtual results</h2><span class="hint" id="cutText"></span></div>
       <div class="tbl"><table id="resTable"></table></div>
       <p class="hint" id="calNote"></p>
     </section>
 
-    <section class="card" aria-labelledby="why-h">
+    <section class="card result" aria-labelledby="why-h">
       <div class="card-head"><h2 id="why-h">Why cells died in each arm</h2><span class="hint">share of death hazard by cause</span></div>
       <div id="why" class="why"></div>
     </section>
 
-    <section class="card" aria-labelledby="plots-h">
+    <section class="card result" aria-labelledby="plots-h">
       <div class="card-head"><h2 id="plots-h">Tube viewer</h2>
         <div class="tools"><select id="tubeSel" aria-label="Tube"></select>
           <label class="inline"><input id="truth" type="checkbox"> Colour by true cell state</label></div>
@@ -128,12 +129,12 @@
       <p class="hint" id="truthLegend" hidden>Colours show what each event really is in the simulation: <b class="t0">live</b>, <b class="t1">dying (PI-dim)</b>, <b class="t2">dead</b>, <b class="t3">debris</b>, <b class="t4">doublet</b>. Compare with where the gates put them.</p>
     </section>
 
-    <section class="card" aria-labelledby="sp-h">
+    <section class="card result" aria-labelledby="sp-h">
       <div class="card-head"><h2 id="sp-h">Compensation</h2></div>
       <div class="grid-sp"><div><h3>Measured from single stains</h3><div class="tbl" id="spMeas"></div></div><div><h3>True spillover at sample voltages</h3><div class="tbl" id="spTrue"></div></div></div>
     </section>
 
-    <section class="card" aria-labelledby="dl-h">
+    <section class="card result" aria-labelledby="dl-h">
       <div class="card-head"><h2 id="dl-h">Take the virtual data further</h2></div>
       <p class="hint">Download the virtual tubes as FCS 3.1 files and gate them in FlowJo for practice, or the results as CSV.</p>
       <div class="row-btns"><button id="dlCsv" type="button">Results CSV</button><select id="dlTube" aria-label="Tube to download"></select><button id="dlFcs" type="button">Download FCS</button><button id="dlAll" type="button">All tubes (FCS)</button></div>
@@ -141,9 +142,19 @@
     </section>
 
     <section class="card" aria-labelledby="db-h">
-      <div class="card-head"><h2 id="db-h">Lab notebook (Supabase)</h2><span class="pill" id="dbState"></span></div>
+      <div class="card-head"><h2 id="db-h">Lab notebook (Supabase)</h2><span class="pill" id="dbState"></span><button id="signOutBtn" type="button" hidden>Sign out</button></div>
+      <form id="authForm" class="stack">
+        <h3>Sign in to use the notebook</h3>
+        <p class="hint">Saving a virtual run or a measured result needs a signed-in account. Anyone with the old public link can no longer write these tables.</p>
+        <div class="grid2">
+          <div class="field"><label for="authEmail">Email</label><input id="authEmail" type="email" autocomplete="username" required></div>
+          <div class="field"><label for="authPass">Password</label><input id="authPass" type="password" autocomplete="current-password" required minlength="6"></div>
+        </div>
+        <div class="row-btns"><button class="primary" type="submit">Sign in</button><button id="signUpBtn" type="button">Create account</button></div>
+        <p class="status" id="authStatus" role="status"></p>
+      </form>
       <div class="grid-db">
-        <form id="saveForm" class="stack">
+        <form id="saveForm" class="stack" hidden>
           <h3>Save this virtual run</h3>
           <div class="field"><label for="runName">Name</label><input id="runName" type="text" placeholder="e.g. Gentle PMA, IFN after rest"></div>
           <div class="field"><label for="runAuthor">Your name</label><input id="runAuthor" type="text"></div>
@@ -151,12 +162,12 @@
           <button class="primary" type="submit">Save run</button>
           <p class="status" id="saveStatus" role="status"></p>
         </form>
-        <div class="stack">
+        <div class="stack" id="realCol" hidden>
           <h3>Saved runs</h3>
           <select id="savedList" aria-label="Saved runs"></select>
           <div class="row-btns"><button id="loadBtn" type="button">Load settings</button><button id="refreshBtn" type="button">Refresh</button></div>
           <h3>Record what really happened</h3>
-          <p class="hint">After the bench run, enter the measured values for the selected saved run. The table below compares prediction and reality, which is how the model gets better.</p>
+          <p class="hint">After the bench run, enter the measured values for the selected saved run. The table compares the prediction with what you measured. It does not refit the model by itself.</p>
           <form id="realForm" class="grid2">
             <div class="field"><label for="realArm">Arm</label><select id="realArm"><option value="untreated">Untreated</option><option value="ifn">IFN-γ</option><option value="pma">PMA</option><option value="combo">PMA + IFN-γ</option></select></div>
             <div class="field"><label for="realDate">Bench date</label><input id="realDate" type="date"></div>
@@ -172,13 +183,13 @@
       <div class="tbl"><table id="cmpTable"></table></div>
     </section>
 
-    <p class="foot">Model coefficients are estimates fitted to the 7 Sep, 29 Sep, 4 Oct and 12 Oct runs, not published constants. Use the simulator to decide what to test, then let the bench decide what is true.</p>
+    <p class="foot">The viability model was fitted to four runs from this lab (7 Sep, 29 Sep, 4 Oct and 12 Oct 2026), not to published constants. A protocol that changes dose, wash, rest, detachment or timing is outside that fit: the table then shows a range, and pre-flight will not say Ready. Use it to choose what to test. The bench decides what is true.</p>
   </main>
 </div>
 <!--SIM-BODY-END-->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script src="config.js"></script>
-<script src="sim/engine.js"></script>
-<script src="sim/ui.js?v=2"></script>
+<script src="sim/engine.js?v=3"></script>
+<script src="sim/ui.js?v=3"></script>
 </body>
 </html>

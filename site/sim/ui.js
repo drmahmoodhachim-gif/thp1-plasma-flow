@@ -3,7 +3,7 @@
   'use strict';
   const E = window.SimEngine;
   const $ = (id) => document.getElementById(id);
-  const ENGINE_VERSION = 'sim-1.0 (calibrated to 12 Oct 2026)';
+  const ENGINE_VERSION = 'sim-1.1 (ranges, gates, signed notebook)';
   const CH = ['FSC', 'SSC', 'PI', 'PE-Cy7', 'BV786'];
 
   // ---------- presets ----------
@@ -38,29 +38,105 @@
     G_NUM.forEach(k => $(k).value = g[k]); $('seed').value = s.seed;
     syncVoltC();
   }
+  const LIMITS = {
+    pmaDose: [0, 500, 'PMA, ng/mL'], pmaHours: [0, 96, 'PMA, hours'], restHours: [0, 96, 'Rest, hours'],
+    ifnDose: [0, 500, 'IFN-γ, ng/mL'], ifnHours: [0, 96, 'IFN-γ, hours'], seedDensity: [0.1, 2, 'Seeding, M/mL'],
+    serum: [0, 20, 'FBS, %'], passage: [1, 60, 'Passage'], delayMin: [0, 360, 'Time to cytometer, min'], washes: [0, 6, 'Washes'],
+    fscMin: [0, 262143, 'Cells: FSC-A'], sscMin: [0, 262143, 'Cells: SSC-A'], singLo: [0.2, 1.1, 'Singlet lower bound'],
+    singHi: [0.2, 1.2, 'Singlet upper bound'], piCut: [100, 80000, 'Live PI cut-off'], seed: [1, 999999, 'Random seed']
+  };
+  const HLA_OK = [1, 0.3, 0.008], CD_OK = [1, 0.3, 0.02];
+  const near = (v, allowed) => allowed.some(a => Math.abs(v - a) < 1e-6);
+  function readBounded(id, min, max, label, errors) {
+    const raw = $(id).value;
+    if (raw === '' || raw == null) { errors.push(`${label} is empty. The run was not started, and no default was filled in.`); return null; }
+    const v = parseFloat(raw);
+    if (!Number.isFinite(v)) { errors.push(`${label} is not a number.`); return null; }
+    if (v < min || v > max) { errors.push(`${label} must be between ${min} and ${max}.`); return null; }
+    return v;
+  }
   function fromForm() {
-    const num = (id, d) => { const v = parseFloat($(id).value); return Number.isFinite(v) ? v : d; };
-    const p = {}; P_NUM.forEach(k => p[k] = num(k, E.DEFAULT_PROTOCOL[k])); P_BOOL.forEach(k => p[k] = $(k).value === 'true'); P_STR.forEach(k => p[k] = $(k).value);
-    P_CHECK.forEach(k => p[k] = $(k).checked); p.replicates = parseInt($('replicates').value, 10);
-    p.abQuality = { hla: parseFloat($('abHla').value), cd11b: parseFloat($('abCd11b').value) };
-    const sampleV = {}, controlV = {}; CH.forEach(c => { sampleV[c] = num('vs' + c, E.REF_V[c]); controlV[c] = num('vc' + c, E.REF_V[c]); });
+    const errors = [];
+    const p = {};
+    P_NUM.forEach(k => { const spec = LIMITS[k]; p[k] = readBounded(k, spec[0], spec[1], spec[2], errors); });
+    P_BOOL.forEach(k => p[k] = $(k).value === 'true');
+    P_STR.forEach(k => p[k] = $(k).value);
+    P_CHECK.forEach(k => p[k] = $(k).checked);
+    p.replicates = parseInt($('replicates').value, 10);
+    if (![1, 2, 3].includes(p.replicates)) errors.push('Replicate tubes must be 1, 2 or 3.');
+    const hla = parseFloat($('abHla').value), cd = parseFloat($('abCd11b').value);
+    if (!near(hla, HLA_OK)) errors.push('HLA-DR stain must be Working, Weak or Failed.');
+    if (!near(cd, CD_OK)) errors.push('CD11b stain must be Working, Weak or Failed.');
+    p.abQuality = { hla, cd11b: cd };
+    const sampleV = {}, controlV = {};
+    CH.forEach(c => {
+      sampleV[c] = readBounded('vs' + c, 200, 900, c + ' voltage', errors);
+      controlV[c] = readBounded('vc' + c, 200, 900, 'Controls ' + c + ' voltage', errors);
+    });
     const same = $('sameVoltages').checked;
-    const instrument = { sampleV, controlV: same ? { ...sampleV } : controlV, sameVoltages: same, events: parseInt($('events').value, 10), compensation: $('compensation').value, threshold: 5000 };
-    const gates = { ...E.DEFAULT_GATES }; G_NUM.forEach(k => gates[k] = num(k, E.DEFAULT_GATES[k]));
-    return { protocol: p, instrument, gates, seed: Math.round(num('seed', 12)) };
+    const events = parseInt($('events').value, 10);
+    if (![5000, 10000, 20000].includes(events)) errors.push('Events per tube must be 5,000, 10,000 or 20,000.');
+    const instrument = { sampleV, controlV: same ? { ...sampleV } : controlV, sameVoltages: same, events, compensation: $('compensation').value, threshold: 5000 };
+    if (!['controls', 'none'].includes(instrument.compensation)) errors.push('Compensation must be from single stains or none.');
+    const gates = { ...E.DEFAULT_GATES };
+    G_NUM.forEach(k => { const spec = LIMITS[k]; gates[k] = readBounded(k, spec[0], spec[1], spec[2], errors); });
+    if (gates.singLo != null && gates.singHi != null && gates.singLo >= gates.singHi) errors.push('Singlet bounds are inverted: the lower H/A bound must be below the upper bound.');
+    const seed = readBounded('seed', LIMITS.seed[0], LIMITS.seed[1], LIMITS.seed[2], errors);
+    return { errors, settings: errors.length ? null : { protocol: p, instrument, gates, seed: Math.round(seed) } };
+  }
+  function savedSettingsOk(row) {
+    const problems = [];
+    const p = row && row.protocol;
+    if (!p || typeof p !== 'object') return ['Saved protocol is missing.'];
+    Object.entries(LIMITS).forEach(([k, spec]) => {
+      if (['fscMin', 'sscMin', 'singLo', 'singHi', 'piCut', 'seed'].includes(k)) return;
+      const v = Number(p[k]);
+      if (!Number.isFinite(v) || v < spec[0] || v > spec[1]) problems.push(`${spec[2]} in the saved run is ${p[k]}.`);
+    });
+    const g = row.gates || {};
+    ['fscMin', 'sscMin', 'singLo', 'singHi', 'piCut'].forEach(k => {
+      const v = Number(g[k]); const spec = LIMITS[k];
+      if (!Number.isFinite(v) || v < spec[0] || v > spec[1]) problems.push(`${spec[2]} in the saved run is ${g[k]}.`);
+    });
+    if (Number(g.singLo) >= Number(g.singHi)) problems.push('Saved singlet bounds are inverted.');
+    const aq = p.abQuality || {};
+    if (!near(Number(aq.hla), HLA_OK) || !near(Number(aq.cd11b), CD_OK)) problems.push('Saved antibody settings are not Working, Weak or Failed.');
+    const inst = row.instrument || {};
+    CH.forEach(c => {
+      const v = inst.sampleV && Number(inst.sampleV[c]);
+      if (!(v >= 200 && v <= 900)) problems.push(`Saved ${c} voltage is ${inst.sampleV && inst.sampleV[c]}.`);
+    });
+    return problems;
   }
   function syncVoltC() { const same = $('sameVoltages').checked; CH.forEach(c => { const el = $('vc' + c); el.disabled = same; if (same) el.value = $('vs' + c).value; }); }
 
   // ---------- run ----------
   let R = null, currentPreset = 'oct12';
   function setRunning(on) { $('runBtn').disabled = on; $('resetBtn').disabled = on; }
+  function showStale() {
+    document.querySelector('.main').classList.add('stale');
+    $('staleNote').hidden = false;
+    ['dlCsv', 'dlFcs', 'dlAll'].forEach(id => { if ($(id)) $(id).disabled = true; });
+  }
+  function clearStale() {
+    document.querySelector('.main').classList.remove('stale');
+    $('staleNote').hidden = true;
+    ['dlCsv', 'dlFcs', 'dlAll'].forEach(id => { if ($(id)) $(id).disabled = false; });
+  }
   function runNow() {
-    const s = fromForm();
+    const parsed = fromForm();
+    if (parsed.errors.length) {
+      showStale();
+      $('runStatus').textContent = parsed.errors.join(' ');
+      return;
+    }
+    const s = parsed.settings;
     setRunning(true); $('runStatus').textContent = 'Running the virtual experiment…';
     setTimeout(() => {
       try {
         const t0 = performance.now();
         R = E.run(s.protocol, s.instrument, s.gates, s.seed); R.settings = s;
+        clearStale();
         renderAll();
         $('runStatus').textContent = `Done: ${R.tubes.length} tubes, ${R.results.reduce((a, r) => a + r.events, 0).toLocaleString()} events in ${Math.round(performance.now() - t0)} ms.`;
       } catch (err) { $('runStatus').textContent = 'Simulation failed: ' + err.message; console.error(err); }
@@ -86,7 +162,8 @@
     const lab = { stop: 'Fix first', warn: 'Warning', info: 'Note', ok: 'Ready' };
     $('checks').innerHTML = R.checks.map(c => `<li><span class="lv ${c.lvl}">${lab[c.lvl]}</span><b>${esc(c.title)}</b><p>${esc(c.body)}</p></li>`).join('');
     const n = { stop: 0, warn: 0 }; R.checks.forEach(c => { if (n[c.lvl] !== undefined) n[c.lvl]++; });
-    $('pfSummary').textContent = n.stop ? `${n.stop} to fix, ${n.warn} warnings` : n.warn ? `${n.warn} warnings` : 'Ready';
+    const warns = n.warn ? `${n.warn} warning${n.warn === 1 ? '' : 's'}` : '';
+    $('pfSummary').textContent = n.stop ? `${n.stop} to fix${warns ? ', ' + warns : ''}` : warns || 'Ready';
   }
 
   function renderTable() {
@@ -97,13 +174,26 @@
     const rows = R.results.map(r => {
       const ctl = r.tube.kind === 'control';
       const few = r.tube.kind === 'sample' && r.liveN < 1000;
-      return `<tr class="${ctl ? 'ctl' : ''}"><td>${esc(r.tube.label)}</td><td>${f0(r.events)}</td><td>${f1(r.livePct)}${realOf(r, 'live')}</td><td>${f1(r.dimPct)}${realOf(r, 'dim')}</td><td>${f1(r.brightPct)}</td>
+      return `<tr class="${ctl ? 'ctl' : ''}"><td>${esc(r.tube.label)}</td><td>${f0(r.events)}</td><td>${liveCell(r, realOf(r, 'live'))}</td><td>${f1(r.dimPct)}${realOf(r, 'dim')}</td><td>${f1(r.brightPct)}</td>
         <td class="${few ? 'bad' : ''}">${f0(r.liveN)}</td><td>${ctl ? '–' : f1(r.hlaPos)}${ctl ? '' : realOf(r, 'hla')}</td><td>${ctl ? '–' : f0(r.hlaMed)}</td><td>${ctl ? '–' : f1(r.cd11bPos)}${ctl ? '' : realOf(r, 'cd11b')}</td><td>${ctl ? '–' : f0(r.cd11bMed)}</td>
-        <td class="${r.piSatPct > 5 ? 'bad' : ''}">${f1(r.piSatPct)}</td><td class="${r.trueLivePct < 90 ? 'bad' : ''}">${ctl ? '–' : f1(r.trueLivePct) + '%'}</td></tr>`;
+        <td class="${r.piSatPct > 5 ? 'bad' : ''}">${f1(r.piSatPct)}</td><td class="${r.trueLivePct < 90 ? 'bad' : ''}">${ctl || !Number.isFinite(r.trueLivePct) ? '–' : f1(r.trueLivePct) + '%'}</td></tr>`;
     }).join('');
     $('resTable').innerHTML = head + '<tbody>' + rows + '</tbody>';
-    $('cutText').textContent = `Gates from FMOs: HLA-DR⁺ > ${f0(R.cut.hla)} · CD11b⁺ > ${f0(R.cut.cd11b)} · live PI < ${f0(R.gates.piCut)}`;
-    $('calNote').textContent = cal ? 'Numbers in brackets are the real 12 Oct 2026 measurements for the same arm (duplicates averaged). Close agreement is what the model was tuned for.' : 'Live % and positives are on single cells; "truly live in live gate" shows how many events the live gate keeps that are really live in the simulation.';
+    const hlaGate = R.cut.hlaFromFmo ? `HLA-DR⁺ > ${f0(R.cut.hla)} from the FMO` : `HLA-DR⁺ > ${f0(R.cut.hla)} is a fallback, not an FMO gate`;
+    const cdGate = R.cut.cd11bFromFmo ? `CD11b⁺ > ${f0(R.cut.cd11b)} from the FMO` : `CD11b⁺ > ${f0(R.cut.cd11b)} is a fallback, not an FMO gate`;
+    $('cutText').textContent = `${hlaGate} · ${cdGate} · live PI < ${f0(R.gates.piCut)}`;
+    const outside = R.extrapolation && R.extrapolation.length;
+    $('calNote').textContent = cal
+      ? 'Numbers in brackets are the real 12 Oct 2026 measurements for the same arm (duplicates averaged). Close agreement is what the model was tuned for.'
+      : outside
+        ? 'A range under Live % is the biological survival if the untested hazard coefficients move. It is not a confidence interval, and it is not the gated percentage.'
+        : 'Live % and positives are on single cells. Truly live in the live gate is how many of those events are really live in the simulation.';
+  }
+  function liveCell(r, realHtml) {
+    const point = f1(r.livePct) + realHtml;
+    if (!r.band) return point;
+    const lo = (100 * r.band.lo).toFixed(0), hi = (100 * r.band.hi).toFixed(0);
+    return `${point}<span class="band">${lo}–${hi}</span>`;
   }
   let dirty = false;
   function isUnchangedPreset() { return !dirty; }
@@ -122,7 +212,7 @@
       return `<div class="whyrow"><span>${names[arm] || arm}</span><div class="whybar" role="img" aria-label="${names[arm]}: ${dead.toFixed(0)}% dead">${segs}</div><span>${dead.toFixed(0)}% dead</span></div>`;
     }).join('');
     const leg = [...used].map(k => `<span><i style="background:${CAUSE[k][1]}"></i>${CAUSE[k][0]}</span>`).join('');
-    $('why').innerHTML = rows + `<div class="whyleg">${leg}</div><p class="hint">Bar length = % of cells that died before or during the run; colours split that death by cause in the model. Hover a segment for its share.</p>`;
+    $('why').innerHTML = rows + `<div class="whyleg">${leg}</div><p class="hint">Bar length is the model’s death fraction before gating and before debris is removed. It will not match PI-dim plus dead in the table, which are counted on single cells after the gates. Hover a segment for its share of the model’s death.</p>`;
   }
 
   function renderTubeSel() {
@@ -202,7 +292,19 @@
   }
 
   // ---------- Supabase lab notebook ----------
-  let sb = null;
+  let sb = null, session = null;
+  function setNotebook(on) {
+    const signed = !!on;
+    $('dbState').textContent = !sb ? 'Offline' : signed ? 'Signed in' : 'Sign in required';
+    $('authForm').hidden = signed;
+    $('signOutBtn').hidden = !signed;
+    $('saveForm').hidden = !signed;
+    document.getElementById('realCol').hidden = !signed;
+    if (!signed) {
+      $('savedList').innerHTML = '<option value="">Sign in to read or write the notebook</option>';
+      $('cmpTable').innerHTML = '';
+    }
+  }
   function summary() {
     const arms = {}; R.results.filter(r => r.tube.kind === 'sample' && r.tube.arm !== 'c1r').forEach(r => { (arms[r.tube.arm] = arms[r.tube.arm] || []).push(r); });
     const out = {}; for (const [a, rs] of Object.entries(arms)) { const m = k => rs.reduce((s, r) => s + r[k], 0) / rs.length; out[a] = { live: +m('livePct').toFixed(2), dim: +m('dimPct').toFixed(2), hla: +m('hlaPos').toFixed(2), cd11b: +m('cd11bPos').toFixed(2), liveN: Math.round(m('liveN')) }; }
@@ -211,6 +313,7 @@
   async function listRuns() {
     const sel = $('savedList');
     if (!sb) { sel.innerHTML = '<option value="">Notebook needs the Netlify site with Supabase configured</option>'; return; }
+    if (!session) { setNotebook(false); return; }
     const { data, error } = await sb.from('sim_runs').select('id,created_at,name,author,protocol,instrument,gates,summary').order('created_at', { ascending: false }).limit(50);
     if (error) { sel.innerHTML = `<option value="">${esc(error.message)}</option>`; return; }
     sel._rows = data || [];
@@ -231,25 +334,42 @@
   }
   async function saveRun(e) {
     e.preventDefault();
-    if (!R) { $('saveStatus').textContent = 'Run a virtual experiment first.'; return; }
+    if (!R || document.querySelector('.main').classList.contains('stale')) { $('saveStatus').textContent = 'Run the virtual experiment again before saving. The table on screen may be from the previous settings.'; return; }
     if (!sb) { $('saveStatus').textContent = 'Saving needs the Netlify site with Supabase configured (config.js).'; return; }
+    if (!session) { $('saveStatus').textContent = 'Sign in before saving. Anonymous writes are closed.'; return; }
     const name = $('runName').value.trim(); if (!name) { $('saveStatus').textContent = 'Give the run a name.'; return; }
     const s = R.settings;
-    const { error } = await sb.from('sim_runs').insert({ name, author: $('runAuthor').value.trim() || null, notes: $('runNotes').value.trim() || null, protocol: s.protocol, instrument: s.instrument, gates: { ...s.gates, seed: s.seed }, summary: summary(), engine_version: ENGINE_VERSION });
+    const { error } = await sb.from('sim_runs').insert({ name, author: $('runAuthor').value.trim() || null, notes: $('runNotes').value.trim() || null, protocol: s.protocol, instrument: s.instrument, gates: { ...s.gates, seed: s.seed }, summary: summary(), engine_version: ENGINE_VERSION, user_id: session.user.id });
     $('saveStatus').textContent = error ? error.message : 'Saved to the lab notebook.';
     if (!error) listRuns();
   }
   async function saveReal(e) {
     e.preventDefault();
-    const sel = $('savedList'); if (!sb || !sel.value) { $('realStatus').textContent = 'Pick a saved run first.'; return; }
+    const sel = $('savedList'); if (!sb || !session) { $('realStatus').textContent = 'Sign in before recording a measured result.'; return; }
+    if (!sel.value) { $('realStatus').textContent = 'Pick a saved run first.'; return; }
     const n = id => { const v = parseFloat($(id).value); return Number.isFinite(v) ? v : null; };
-    const { error } = await sb.from('sim_real_outcomes').insert({ sim_run_id: sel.value, arm: $('realArm').value, run_date: $('realDate').value || null, live_pct: n('realLive'), hla_pos: n('realHla'), cd11b_pos: n('realCd'), live_n: n('realN') });
+    const { error } = await sb.from('sim_real_outcomes').insert({ sim_run_id: sel.value, arm: $('realArm').value, run_date: $('realDate').value || null, live_pct: n('realLive'), hla_pos: n('realHla'), cd11b_pos: n('realCd'), live_n: n('realN'), user_id: session.user.id });
     $('realStatus').textContent = error ? error.message : 'Measured result saved.';
     if (!error) renderCompare();
   }
   function loadSaved() {
     const sel = $('savedList'); const row = (sel._rows || []).find(r => r.id === sel.value); if (!row) return;
-    const s = base(); Object.assign(s.protocol, row.protocol); Object.assign(s.instrument, row.instrument); const { seed, ...g } = row.gates || {}; Object.assign(s.gates, g); if (seed) s.seed = seed;
+    const problems = savedSettingsOk(row);
+    if (problems.length) { $('saveStatus').textContent = 'This saved run was not loaded. ' + problems.join(' '); return; }
+    const s = base();
+    const p = row.protocol;
+    Object.keys(s.protocol).forEach(k => { if (p[k] !== undefined && k !== 'abQuality') s.protocol[k] = p[k]; });
+    s.protocol.abQuality = { hla: Number(p.abQuality.hla), cd11b: Number(p.abQuality.cd11b) };
+    if (row.instrument) {
+      s.instrument.sameVoltages = !!row.instrument.sameVoltages;
+      s.instrument.events = row.instrument.events;
+      s.instrument.compensation = row.instrument.compensation;
+      s.instrument.sampleV = { ...E.REF_V, ...row.instrument.sampleV };
+      s.instrument.controlV = { ...E.REF_V, ...(row.instrument.controlV || row.instrument.sampleV) };
+    }
+    const { seed, ...g } = row.gates || {};
+    Object.keys(g).forEach(k => { if (k in s.gates) s.gates[k] = g[k]; });
+    if (Number.isFinite(Number(seed))) s.seed = Number(seed);
     currentPreset = 'custom'; dirty = true; toForm(s); runNow();
   }
 
@@ -258,7 +378,9 @@
     buildVoltageInputs();
     toForm(PRESETS.oct12());
     $('preset').addEventListener('change', () => { currentPreset = $('preset').value; toForm(PRESETS[currentPreset]()); dirty = false; runNow(); });
-    document.querySelector('.side').addEventListener('input', (e) => { if (e.target.id !== 'preset') dirty = true; });
+    const markEdited = (e) => { if (!e.target || e.target.id === 'preset') return; dirty = true; if (R) showStale(); };
+    document.querySelector('.side').addEventListener('input', markEdited);
+    document.querySelector('.side').addEventListener('change', markEdited);
     $('sameVoltages').addEventListener('change', syncVoltC);
     CH.forEach(c => $('vs' + c).addEventListener('input', syncVoltC));
     $('runBtn').addEventListener('click', runNow);
@@ -269,9 +391,25 @@
     $('dlAll').addEventListener('click', () => { if (!R) return; R.tubes.forEach((t, k) => setTimeout(() => dlFcs(t.id), k * 350)); $('dlStatus').textContent = `Downloading ${R.tubes.length} FCS files…`; });
     $('saveForm').addEventListener('submit', saveRun); $('realForm').addEventListener('submit', saveReal);
     $('loadBtn').addEventListener('click', loadSaved); $('refreshBtn').addEventListener('click', listRuns); $('savedList').addEventListener('change', renderCompare);
+    $('authForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!sb) { $('authStatus').textContent = 'Supabase is not configured on this page.'; return; }
+      const email = $('authEmail').value.trim(), password = $('authPass').value;
+      const { error } = await sb.auth.signInWithPassword({ email, password });
+      $('authStatus').textContent = error ? error.message : 'Signed in.';
+    });
+    $('signUpBtn').addEventListener('click', async () => {
+      if (!sb) return;
+      const email = $('authEmail').value.trim(), password = $('authPass').value;
+      const { data, error } = await sb.auth.signUp({ email, password });
+      $('authStatus').textContent = error ? error.message : (data.session ? 'Account created and signed in.' : 'Account created. Confirm the email if Supabase asks, then sign in.');
+    });
+    $('signOutBtn').addEventListener('click', async () => { if (sb) await sb.auth.signOut(); });
     try { const cfg = window.E1_CONFIG || {}; if (window.supabase && cfg.supabaseUrl && cfg.supabaseAnonKey) sb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey); } catch (e) { sb = null; }
-    $('dbState').textContent = sb ? 'Connected' : 'Offline';
-    listRuns();
+    if (sb) {
+      sb.auth.onAuthStateChange((_evt, sess) => { session = sess; setNotebook(!!sess); if (sess) listRuns(); });
+      sb.auth.getSession().then(({ data }) => { session = data.session; setNotebook(!!session); if (session) listRuns(); });
+    } else setNotebook(false);
     runNow();
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();

@@ -66,6 +66,10 @@ th:first-child, td:first-child { text-align:left }
 thead th { color:var(--muted); font-weight:600; font-size:12px; vertical-align:bottom; white-space:normal }
 tr.ctl td { color:var(--muted) }
 td .real { color:var(--muted); font-size:12px; margin-left:4px }
+td .band { display:block; color:var(--amber); font-size:12px; font-weight:600 }
+.stale-note { margin:0; padding:10px 12px; border-radius:8px; background:var(--warn-bg); color:var(--warn-fg); font-weight:600 }
+.main.stale section.result { opacity:0.45 }
+.main.stale section.result button, .main.stale section.result select { pointer-events:none }
 td.bad { color:var(--coral); font-weight:600 }
 .why { display:grid; gap:8px }
 .whyrow { display:grid; grid-template-columns:120px 1fr 64px; gap:10px; align-items:center; font-size:13px }
