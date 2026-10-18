@@ -95,7 +95,10 @@
       <p class="hint">HLA-DR⁺ and CD11b⁺ gates are set from the FMO tubes (99th percentile of live cells).</p>
     </details>
 
-    <button id="runBtn" class="primary" type="button">Run virtual experiment</button>
+    <div class="row-btns">
+      <button id="runBtn" class="primary" type="button">Run virtual experiment</button>
+      <button id="resetBtn" type="button">Reset to start</button>
+    </div>
     <p id="runStatus" class="status" role="status"></p>
   </aside>
 
@@ -176,6 +179,6 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
 <script src="config.js"></script>
 <script src="sim/engine.js"></script>
-<script src="sim/ui.js"></script>
+<script src="sim/ui.js?v=2"></script>
 </body>
 </html>

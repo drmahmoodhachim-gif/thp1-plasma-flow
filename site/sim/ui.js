@@ -53,9 +53,10 @@
 
   // ---------- run ----------
   let R = null, currentPreset = 'oct12';
+  function setRunning(on) { $('runBtn').disabled = on; $('resetBtn').disabled = on; }
   function runNow() {
     const s = fromForm();
-    $('runBtn').disabled = true; $('runStatus').textContent = 'Running the virtual experiment…';
+    setRunning(true); $('runStatus').textContent = 'Running the virtual experiment…';
     setTimeout(() => {
       try {
         const t0 = performance.now();
@@ -63,8 +64,16 @@
         renderAll();
         $('runStatus').textContent = `Done: ${R.tubes.length} tubes, ${R.results.reduce((a, r) => a + r.events, 0).toLocaleString()} events in ${Math.round(performance.now() - t0)} ms.`;
       } catch (err) { $('runStatus').textContent = 'Simulation failed: ' + err.message; console.error(err); }
-      $('runBtn').disabled = false;
+      setRunning(false);
     }, 30);
+  }
+  function resetToStart() {
+    const key = PRESETS[$('preset').value] ? $('preset').value : 'oct12';
+    $('preset').value = key;
+    currentPreset = key;
+    dirty = false;
+    toForm(PRESETS[key]());
+    runNow();
   }
 
   const f1 = v => Number.isFinite(v) ? v.toFixed(1) : '–';
@@ -253,6 +262,7 @@
     $('sameVoltages').addEventListener('change', syncVoltC);
     CH.forEach(c => $('vs' + c).addEventListener('input', syncVoltC));
     $('runBtn').addEventListener('click', runNow);
+    $('resetBtn').addEventListener('click', resetToStart);
     $('tubeSel').addEventListener('change', renderPlots); $('truth').addEventListener('change', renderPlots);
     $('dlCsv').addEventListener('click', () => R && dlCsv());
     $('dlFcs').addEventListener('click', () => R && dlFcs($('dlTube').value));
