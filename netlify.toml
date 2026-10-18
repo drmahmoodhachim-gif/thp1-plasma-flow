@@ -6,3 +6,8 @@
   [headers.values]
     Cache-Control = "public, max-age=86400"
     Access-Control-Allow-Origin = "*"
+
+[[redirects]]
+  from = "/sim"
+  to = "/sim.html"
+  status = 200
